@@ -108,6 +108,14 @@
                           </t-image-viewer>
                         </div>
                       </template>
+                      <template #name="{ row: subRow }">
+                        <div class="nameCell">
+                          <t-tag v-if="assetTierLabel(subRow)" size="small" theme="primary" variant="light" class="tierTag">
+                            {{ assetTierLabel(subRow) }}
+                          </t-tag>
+                          <span>{{ subRow.name }}</span>
+                        </div>
+                      </template>
                       <template #prompt="{ row: subRow }">
                         <div class="promptCell">
                           <t-loading v-if="subRow.promptState === '生成中'" size="small" style="margin-right: 4px" />
@@ -540,6 +548,8 @@ interface Asset {
   type: "role" | "tool" | "scene" | "clip"; // "角色" | "道具" | "场景" | "素材"
   state: string;
   sonAssets?: Asset[]; // 子资产列表
+  lockCode?: string;
+  assetTier?: "t0_base" | "t1_wardrobe" | "derive_child";
   imageId: number;
   promptState: string;
   filePath: string;
@@ -677,6 +687,14 @@ function keep() {
     handleBatchGenerateImage();
   }
 }
+function assetTierLabel(asset: Pick<Asset, "assetTier" | "lockCode">): string {
+  if (asset.assetTier === "t1_wardrobe") {
+    const stage = asset.lockCode?.split(":")[1];
+    return stage ? `衍生·${stage}` : "衍生";
+  }
+  if (asset.assetTier === "derive_child") return "衍生";
+  return "";
+}
 // 获取所有选中的子资产
 function getSelectedSubAssets(): Asset[] {
   const subAssets: Asset[] = [];
@@ -715,6 +733,17 @@ async function handleBatchGeneratePrompt() {
   selectedSubRowKeys.value = selectedSubRowKeys.value.filter((key) => !selectedSubAssets.some((a) => a.id === key));
   batchGenerationShow.value = false;
   try {
+    const needEnsure = selectedAssets.filter(
+      (a: { type?: string; prompt?: string }) =>
+        (a.type === "scene" || a.type === "tool") && (!a.prompt || !a.prompt.trim()),
+    );
+    if (needEnsure.length) {
+      await axios.post("/assetsGenerate/batchEnsureAssetPrompts", {
+        projectId: project.value?.id,
+        assetIds: needEnsure.map((a: { id: number }) => a.id),
+        aiPolishEmpty: true,
+      });
+    }
     await axios.post("/assetsGenerate/batchPolishAssetsPrompt", {
       projectId: project.value?.id,
       concurrentCount: otherSetting.value.assetsBatchGenereateSize,
@@ -910,9 +939,10 @@ const subColumns: TableProps["columns"] = [
   {
     colKey: "name",
     title: $t("workbench.assets.colName"),
-    width: 100,
+    width: 120,
     align: "left",
     ellipsis: true,
+    cell: "name",
   },
   {
     colKey: "prompt",
@@ -1323,6 +1353,15 @@ async function getBigImageUrl(row: Asset, fn: Function) {
 </script>
 
 <style lang="scss" scoped>
+.nameCell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.tierTag {
+  flex-shrink: 0;
+}
 .assets {
   height: 100%;
   display: flex;

@@ -30,7 +30,11 @@ export default defineStore(
 
     const language = ref<string>("zh-CN");
 
-    return { showSetting, baseUrl, otherSetting, themeSetting, language, activeMenu, isElectron, canvasWheelEvent, needUpdate };
+    const mdEditorTheme = computed(() =>
+      themeSetting.value.mode === "auto" ? undefined : themeSetting.value.mode,
+    );
+
+    return { showSetting, baseUrl, otherSetting, themeSetting, mdEditorTheme, language, activeMenu, isElectron, canvasWheelEvent, needUpdate };
   },
   { persist: { pick: ["baseUrl", "otherSetting", "themeSetting", "language"] } },
 );

@@ -319,7 +319,7 @@ async function handleBatchGeneratePrompt() {
 async function generatePrompt(data: AssetItem) {
   rowPromptLoading.value[data.id] = true;
   try {
-    const res = await axios.post("/assets/polishAssetsPrompt", {
+    const res = await axios.post("/assetsGenerate/polishAssetsPrompt", {
       projectId: project.value?.id,
       assetsId: data.id,
       type: props.type ?? "props",
@@ -353,8 +353,12 @@ async function handleBatchGenerateImage() {
   // 检查是否所有选中的资产都有提示词
   const assetsWithoutPrompt = selectedAssets.filter((item) => !item.prompt || item.prompt.trim() === "");
   if (assetsWithoutPrompt.length > 0) {
-    window.$message.warning($t('workbench.assets.batch.missingPrompts', { count: assetsWithoutPrompt.length }));
-    return;
+    await axios.post("/assetsGenerate/batchEnsureAssetPrompts", {
+      projectId: project.value?.id,
+      assetIds: assetsWithoutPrompt.map((item) => item.id),
+      aiPolishEmpty: true,
+    });
+    window.$message.info(`已为 ${assetsWithoutPrompt.length} 个场景/道具资产生成提示词`);
   }
   imageGenerateCancel.value = false;
   imageLoading.value = true;

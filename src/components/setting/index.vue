@@ -49,13 +49,14 @@ import dbConfig from "./components/dbConfig.vue";
 import otherConfig from "./components/otherConfig.vue";
 import about from "./components/about.vue";
 import logoutConfig from "./components/logoutConfig.vue";
-import vendorConfig from "./components/vendorConfig.vue";
 import memoryConfig from "./components/memoryConfig.vue";
 import fileManagement from "./components/fileManagement.vue";
-import skillManagement from "./components/skillManagement.vue";
-import devConfig from "./components/devConfig.vue";
 import promptManage from "./components/promptManage.vue";
 import modelMap from "./components/modelMap.vue";
+
+const vendorConfig = defineAsyncComponent(() => import("./components/vendorConfig.vue"));
+const skillManagement = defineAsyncComponent(() => import("./components/skillManagement.vue"));
+const devConfig = defineAsyncComponent(() => import("./components/devConfig.vue"));
 
 const menuItems = [
   { key: "ui", label: "settings.menu.ui", icon: "i-theme" },

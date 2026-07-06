@@ -56,6 +56,14 @@ import axios from "@/utils/axios";
 import projectStore from "@/stores/project";
 import promptEditor from "@/components/promptEditor.vue";
 import imageListCacheStore from "@/stores/imageListCache";
+import {
+  sortMediasForRef,
+  buildRefSlots,
+  refSlotsToReferences,
+  buildUploadInfoFromMedias,
+  resolveMediaSrc,
+  inferMediaSource,
+} from "@/utils/refSlotUtils";
 
 const { project } = storeToRefs(projectStore());
 const episodesId = inject<Ref<number>>("episodesId")!;
@@ -85,9 +93,10 @@ const modelParmas = ref<ModelSetting>({
 
 const storyboardList = ref<StoryboardItem[]>([]); // 分镜列表
 
-/** 排序优先级：assets有图=0，storyboard有图=1，无图=2 */
+/** 排序优先级：有 resolvedSrc 的资产=0，分镜=1，无图=2 */
 function getImageItemPriority(item: UploadItem): number {
-  if (item.src) return item.sources === "assets" ? 0 : 1;
+  const src = resolveMediaSrc(item);
+  if (src) return item.sources === "assets" ? 0 : 1;
   return 2;
 }
 
@@ -104,12 +113,12 @@ const imageList = computed({
       const cached = getCache(pid, sid, trackId);
 
       if (cached?.length) {
-        return [...cached].sort((a, b) => getImageItemPriority(a) - getImageItemPriority(b));
+        return sortMediasForRef(cached);
       }
     }
     const medias = currentTrack.value?.medias;
     if (!medias?.length) return [];
-    return [...(medias as UploadItem[])].sort((a, b) => getImageItemPriority(a) - getImageItemPriority(b));
+    return sortMediasForRef(medias as UploadItem[]);
   },
   set(val: UploadItem[]) {
     if (currentTrack.value) {
@@ -240,25 +249,31 @@ function parseMode(value: string): VideoMode | null {
   }
   return value as Exclude<VideoMode, ReferenceType[]>;
 }
-/** uploadBox 作为 promptEditor 的引用预览 */
+/** uploadBox 作为 promptEditor 的引用预览（与 upload 条带同源 refSlots） */
 const references = computed(() => {
   function getFileTypeByExt(src: string | undefined): "image" | "video" | "audio" {
     if (!src) return "image";
-    // 去掉 query 和 hash 部分
     const cleanSrc = src.split("?")[0].split("#")[0];
     const ext = cleanSrc.split(".").pop()?.toLowerCase() ?? "";
-
     if (["mp4", "webm", "mov", "avi", "mkv"].includes(ext)) return "video";
     if (["mp3", "wav", "ogg", "aac", "flac", "m4a"].includes(ext)) return "audio";
     return "image";
   }
 
-  return imageList.value
-    .filter((item) => item.src)
+  const slots = buildRefSlots(imageList.value);
+  const imageSlots = refSlotsToReferences(slots);
+  const nonImageRefs = imageList.value
+    .filter((item) => {
+      const src = resolveMediaSrc(item);
+      if (!src) return false;
+      return getFileTypeByExt(src) !== "image";
+    })
     .map((item) => ({
-      type: getFileTypeByExt(item.src) as "image" | "video" | "audio" | "text",
-      src: item.src ?? "",
+      type: getFileTypeByExt(resolveMediaSrc(item)) as "image" | "video" | "audio" | "text",
+      src: resolveMediaSrc(item),
+      label: item.name || `分镜${item.index ?? item.id ?? "?"}`,
     }));
+  return [...imageSlots, ...nonImageRefs];
 });
 
 async function getGenerateData() {
@@ -301,29 +316,27 @@ function handlePromptBlur() {
 async function genText() {
   const track = currentTrack.value;
   if (track.id == null || track.state === "生成中") return;
-  let info: { id: number; sources: string }[] = [];
   const currentTrackId = track.id;
   const rawMedias = (track.medias ?? []) as UploadItem[];
+  const refSlots = buildRefSlots(rawMedias);
+  let info: { id: number; sources: string }[] = [];
   if (modelParmas.value.mode == "text") {
-    info = rawMedias.map(({ id, sources }) => ({ id: id!, sources }));
+    info = rawMedias
+      .filter((item) => typeof item.id === "number")
+      .map(({ id, sources, type }) => ({ id: id!, sources: sources ?? inferMediaSource({ sources, type }) }));
   } else {
-    const frameMode = ["startEndRequired", "endFrameOptional", "startFrameOptional"];
-    const preSliced = frameMode.includes(modelParmas.value.mode)
-      ? rawMedias.slice(0, 2)
-      : modelParmas.value.mode === "singleImage"
-        ? rawMedias.slice(0, 1)
-        : rawMedias;
-    const filtered = preSliced.filter((item) => typeof item.id === "number" && !isNaN(item.id)).map(({ id, sources }) => ({ id: id!, sources }));
-    if (frameMode.includes(modelParmas.value.mode)) info = filtered.slice(0, 2);
-    else if (modelParmas.value.mode === "singleImage") info = filtered.slice(0, 1);
-    else info = filtered;
+    info = buildUploadInfoFromMedias(rawMedias, modelParmas.value.mode).map(({ id, sources }) => ({
+      id,
+      sources,
+    }));
   }
   track.state = "生成中";
   try {
     const { data } = await axios.post("/production/workbench/generateVideoPrompt", {
       projectId: project.value?.id,
       trackId: currentTrackId,
-      info: info,
+      info,
+      refSlots: refSlots.map(({ slot, source, id, label, lockCode }) => ({ slot, source, id, label, lockCode })),
       model: modelParmas.value.model,
       mode: modelParmas.value.mode,
     });
@@ -360,7 +373,8 @@ function trackChange(prevIndex?: number) {
   }
   modelParmas.value.duration = clampDuration(trackList.value?.[activeTrackIndex.value]?.duration);
 }
-/** 监听当前轨道的 medias 变化，实时同步到缓存 */
+/** 监听当前轨道的 medias 变化，实时同步到缓存与后端 */
+let mediasPersistTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
   () => currentTrack.value?.medias,
   (medias) => {
@@ -370,6 +384,20 @@ watch(
     const trackId = currentTrack.value?.id;
     if (pid != null && sid != null && trackId != null) {
       setCache(pid, sid, trackId, medias as unknown as UploadItem[]);
+      if (mediasPersistTimer) clearTimeout(mediasPersistTimer);
+      mediasPersistTimer = setTimeout(() => {
+        axios
+          .post("/production/workbench/updateTrackMedias", {
+            trackId,
+            medias: (medias as UploadItem[]).map((item) => ({
+              id: item.id,
+              sources: item.sources ?? inferMediaSource(item),
+              src: item.src,
+              fileType: item.fileType,
+            })),
+          })
+          .catch(() => {});
+      }, 800);
     }
   },
   { deep: true },
@@ -397,20 +425,10 @@ async function generateVideo() {
           uploadData:
             modelParmas.value.mode === "text"
               ? []
-              : (() => {
-                  const frameMode = ["startEndRequired", "endFrameOptional", "startFrameOptional"];
-                  const preSliced = frameMode.includes(modelParmas.value.mode)
-                    ? imageList.value.slice(0, 2)
-                    : modelParmas.value.mode === "singleImage"
-                      ? imageList.value.slice(0, 1)
-                      : imageList.value;
-                  const filtered = preSliced
-                    .filter((item) => Boolean(item.src) && typeof item.id === "number" && !isNaN(item.id))
-                    .map(({ id, sources }) => ({ id, sources }));
-                  if (frameMode.includes(modelParmas.value.mode)) return filtered.slice(0, 2);
-                  if (modelParmas.value.mode === "singleImage") return filtered.slice(0, 1);
-                  return filtered;
-                })(),
+              : buildUploadInfoFromMedias(imageList.value, modelParmas.value.mode).map(({ id, sources }) => ({
+                  id,
+                  sources,
+                })),
           prompt: currentTrack.value.prompt,
           model: modelParmas.value.model,
           mode: modelParmas.value.mode,

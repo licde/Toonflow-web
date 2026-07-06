@@ -4,7 +4,7 @@
       <t-card shadow class="card">
         <template #title>
           {{ $t("workbench.cornerScape.batchSettings") }}
-          <t-tag size="small" theme="primary" variant="light" style="margin-left: 8px">{{ dataList.length }}</t-tag>
+          <t-tag size="small" theme="primary" variant="light" style="margin-left: 8px">{{ displayRows.length }}</t-tag>
         </template>
         <t-form labelAlign="top">
           <t-form-item :label="$t('workbench.cornerScape.quickActions')">
@@ -69,7 +69,14 @@
       </t-card>
     </div>
     <div class="content">
-      <t-card v-show="dataList.length > 0" shadow class="card" v-for="item in dataList" :key="item.id" @click="openDrawer(item)">
+      <t-card
+        v-show="displayRows.length > 0"
+        shadow
+        class="card"
+        :class="{ sonCard: item.isChild }"
+        v-for="item in displayRows"
+        :key="item.id"
+        @click="openDrawer(item)">
         <div class="imageBox">
           <t-checkbox class="selectBox" :checked="selectedIds.includes(item.id)" @click.stop @change="toggleSelect(item.id)" />
           <div class="cancelGeneration" @click.stop="cancelGenerationFn(item)" v-if="item.state === '生成中'">
@@ -100,7 +107,10 @@
         </div>
         <div class="infoBox">
           <div class="title ac jb">
-            {{ item.name }}
+            <span class="nameRow">
+              <t-tag v-if="assetTierLabel(item)" size="small" theme="primary" variant="light" class="tierTag">{{ assetTierLabel(item) }}</t-tag>
+              {{ item.name }}
+            </span>
             <t-tag size="small" variant="outline" theme="success" v-if="item.prompt">已生成提示词</t-tag>
             <t-tag size="small" variant="outline" theme="danger" v-else>未生成提示词</t-tag>
           </div>
@@ -139,7 +149,7 @@
           </div>
         </div>
       </t-card>
-      <t-empty v-if="dataList.length === 0" type="empty" :title="$t('workbench.cornerScape.operateScriptFirst')" />
+      <t-empty v-if="displayRows.length === 0" type="empty" :title="$t('workbench.cornerScape.operateScriptFirst')" />
       <t-drawer :closeBtn="true" closeOnEscKeydown :showOverlay="false" :footer="false" v-model:visible="drawerVisible" size="480px">
         <template #header>
           <div class="drawerHeader">
@@ -273,7 +283,81 @@ interface DataItem {
   promptErrorReason: string;
   relepedAudio: { id: number; name: string }[];
   audioBindState: string;
+  lockCode?: string;
+  assetTier?: "t0_base" | "t1_wardrobe" | "derive_child";
+  sonAssets?: DataItem[];
+  isChild?: boolean;
 }
+
+function flattenAssets(roots: DataItem[]): DataItem[] {
+  const flat: DataItem[] = [];
+  for (const root of roots) {
+    flat.push(root);
+    if (root.sonAssets?.length) flat.push(...root.sonAssets);
+  }
+  return flat;
+}
+
+function findAssetInTree(roots: DataItem[], id: number): DataItem | undefined {
+  for (const root of roots) {
+    if (root.id === id) return root;
+    const son = root.sonAssets?.find((s) => s.id === id);
+    if (son) return son;
+  }
+  return undefined;
+}
+
+function patchAssetInTree(id: number, patch: Partial<DataItem>) {
+  for (const root of dataList.value) {
+    if (root.id === id) {
+      Object.assign(root, patch);
+      return;
+    }
+    const son = root.sonAssets?.find((s) => s.id === id);
+    if (son) {
+      Object.assign(son, patch);
+      return;
+    }
+  }
+}
+
+function replaceAssetInTree(fresh: DataItem) {
+  const idx = dataList.value.findIndex((d) => d.id === fresh.id);
+  if (idx !== -1) {
+    dataList.value[idx] = { ...dataList.value[idx], ...fresh, sonAssets: dataList.value[idx].sonAssets };
+    return;
+  }
+  for (const root of dataList.value) {
+    const sonIdx = root.sonAssets?.findIndex((s) => s.id === fresh.id) ?? -1;
+    if (sonIdx >= 0 && root.sonAssets) {
+      root.sonAssets[sonIdx] = { ...root.sonAssets[sonIdx], ...fresh };
+      return;
+    }
+  }
+}
+
+function assetTierLabel(asset: Pick<DataItem, "assetTier" | "lockCode">): string {
+  if (asset.assetTier === "t1_wardrobe") {
+    const stage = asset.lockCode?.split(":")[1];
+    return stage ? `衍生·${stage}` : "衍生";
+  }
+  if (asset.assetTier === "derive_child") return "衍生";
+  if (asset.assetTier === "t0_base" && asset.lockCode?.startsWith("CHAR-")) return "原资产";
+  return "";
+}
+
+const displayRows = computed(() => {
+  const rows: DataItem[] = [];
+  for (const parent of dataList.value) {
+    rows.push({ ...parent, isChild: false });
+    for (const son of parent.sonAssets ?? []) {
+      rows.push({ ...son, isChild: true });
+    }
+  }
+  return rows;
+});
+
+const flatAssetList = computed(() => flattenAssets(dataList.value));
 
 const checkboxValue = ref<string[]>([]);
 const { project } = storeToRefs(projectStore());
@@ -322,7 +406,7 @@ onUnmounted(() => {
   stopImagePolling();
   stopAudioPolling();
   // 将所有"生成中"的项重置为空状态
-  dataList.value.forEach((item) => {
+  flatAssetList.value.forEach((item) => {
     if (item.state === "生成中") item.state = "";
   });
 });
@@ -350,12 +434,12 @@ async function getFilteredData() {
 const selectedIds = ref<number[]>([]);
 
 function syncSelectedIdsWithData() {
-  const visibleIds = new Set(dataList.value.map((item) => item.id));
+  const visibleIds = new Set(flatAssetList.value.map((item) => item.id));
   selectedIds.value = Array.from(new Set(selectedIds.value)).filter((id) => visibleIds.has(id));
 }
 
 const previewImages = computed((): string[] => {
-  const selectedImageList = dataList.value
+  const selectedImageList = flatAssetList.value
     .filter((item) => selectedIds.value.includes(item.id) && item.filePath)
     .map((item) => item.filePath as string);
 
@@ -363,7 +447,7 @@ const previewImages = computed((): string[] => {
     return selectedImageList;
   }
 
-  return dataList.value.filter((item) => item.filePath).map((item) => item.filePath as string);
+  return flatAssetList.value.filter((item) => item.filePath).map((item) => item.filePath as string);
 });
 
 const hasPreviewImages = computed(() => previewImages.value.length > 0);
@@ -375,11 +459,11 @@ const toggleSelect = (id: number) => {
 };
 
 const selectByState = (state: string) => {
-  selectedIds.value = dataList.value.filter((item) => (state === "" ? !item.state : item.state === state)).map((item) => item.id);
+  selectedIds.value = flatAssetList.value.filter((item) => (state === "" ? !item.state : item.state === state)).map((item) => item.id);
 };
 //全选提示词为空的
 function selectPromptEmpty() {
-  const lite = dataList.value.filter((item) => !item.prompt || item.prompt.trim() === "").map((item) => item.id);
+  const lite = flatAssetList.value.filter((item) => !item.prompt || item.prompt.trim() === "").map((item) => item.id);
   if (lite.length === 0) {
     window.$message.warning($t("workbench.cornerScape.noEmptyPrompt"));
     return;
@@ -389,14 +473,14 @@ function selectPromptEmpty() {
 }
 
 function selectAll() {
-  selectedIds.value = dataList.value.map((item) => item.id);
+  selectedIds.value = flatAssetList.value.map((item) => item.id);
 }
 
 function toggleSelectAll() {
-  if (selectedIds.value.length === dataList.value.length) {
+  if (selectedIds.value.length === flatAssetList.value.length) {
     selectedIds.value = [];
   } else {
-    selectedIds.value = dataList.value.map((item) => item.id);
+    selectedIds.value = flatAssetList.value.map((item) => item.id);
   }
 }
 function clearSelection() {
@@ -499,11 +583,9 @@ async function openDrawer(item: DataItem) {
       projectId: project.value?.id,
       type: checkboxValue.value,
     });
-    const freshItem = (data as DataItem[]).find((d) => d.id === item.id);
+    const freshItem = findAssetInTree(data as DataItem[], item.id);
     if (freshItem) {
-      // 更新 dataList 中对应项
-      const idx = dataList.value.findIndex((d) => d.id === item.id);
-      if (idx !== -1) dataList.value[idx] = freshItem;
+      replaceAssetInTree(freshItem);
       // 更新当前抽屉项
       currentItem.value = freshItem;
       editForm.prompt = freshItem.prompt || editForm.prompt;
@@ -515,8 +597,7 @@ async function openDrawer(item: DataItem) {
 }
 
 function setItemState(id: number, state: string) {
-  const item = dataList.value.find((i) => i.id === id);
-  if (item) item.state = state;
+  patchAssetInTree(id, { state });
   if (currentItem.value?.id === id) currentItem.value.state = state;
 }
 
@@ -579,7 +660,7 @@ async function savePromptOnBlur() {
     });
     // 同步更新本地数据
     currentItem.value.prompt = editForm.prompt;
-    const target = dataList.value.find((d) => d.id === currentItem.value!.id);
+    const target = findAssetInTree(dataList.value, currentItem.value!.id);
     if (target) target.prompt = editForm.prompt;
     window.$message.success($t("workbench.cornerScape.msg.saveSuccess"));
   } catch (e) {
@@ -621,7 +702,7 @@ async function batchGenerationPrompt() {
     return;
   }
 
-  const items = dataList.value.filter((item) => selectedIds.value.includes(item.id));
+  const items = flatAssetList.value.filter((item) => selectedIds.value.includes(item.id));
 
   // 前端先将所有选中项的 promptState 标记为"生成中"，让轮询自动接管状态跟踪
   items.forEach((item) => {
@@ -646,10 +727,7 @@ async function batchGenerationPrompt() {
   } catch (e: any) {
     window.$message.error(e?.message ?? $t("workbench.cornerScape.msg.promptGenFail"));
     // 生成失败时重置 promptState
-    items.forEach((item) => {
-      const target = dataList.value.find((row) => row.id === item.id);
-      if (target) target.promptState = "";
-    });
+    items.forEach((item) => patchAssetInTree(item.id, { promptState: "" }));
   }
 }
 //绑定音频
@@ -659,7 +737,7 @@ async function batchSelectBindAudio() {
     return;
   }
 
-  const items = dataList.value.filter((item) => selectedIds.value.includes(item.id));
+  const items = flatAssetList.value.filter((item) => selectedIds.value.includes(item.id));
 
   // 前端先将所有选中项的 promptState 标记为"生成中"，让轮询自动接管状态跟踪
   items.forEach((item) => {
@@ -678,10 +756,7 @@ async function batchSelectBindAudio() {
   } catch (e: any) {
     window.$message.error(e.message ?? $t("workbench.cornerScape.msg.promptGenFail"));
     // 生成失败时重置 audioBindState
-    items.forEach((item) => {
-      const target = dataList.value.find((row) => row.id === item.id);
-      if (target) target.audioBindState = "";
-    });
+    items.forEach((item) => patchAssetInTree(item.id, { audioBindState: "" }));
   }
 }
 // 批量生成图片
@@ -699,7 +774,7 @@ async function batchGenerationImage() {
     return;
   }
 
-  const items = dataList.value.filter((item) => selectedIds.value.includes(item.id));
+  const items = flatAssetList.value.filter((item) => selectedIds.value.includes(item.id));
   //检查如果勾选的数据prompt有空的，提示用户勾选的哪一个提示词未生成，然后终止批量生成
   const emptyPrompts = items.filter((item) => !item.prompt);
   if (emptyPrompts.length > 0) {
@@ -740,13 +815,13 @@ async function batchGenerationImage() {
 }
 //轮询
 const notCompultedData = computed(() => {
-  return dataList.value.filter((item) => item.promptState == "生成中");
+  return flatAssetList.value.filter((item) => item.promptState == "生成中");
 });
 const generatingData = computed(() => {
-  return dataList.value.filter((item) => item.state === "生成中");
+  return flatAssetList.value.filter((item) => item.state === "生成中");
 });
 const audioBindData = computed(() => {
-  return dataList.value.filter((item) => item.audioBindState === "生成中");
+  return flatAssetList.value.filter((item) => item.audioBindState === "生成中");
 });
 // 轮询相关
 let pollingTimer: ReturnType<typeof setInterval> | null = null;
@@ -762,11 +837,10 @@ async function pollingPromptAssets() {
     let hasCompleted = false;
     if (Array.isArray(data) && data.length) {
       data.forEach((item: { id: number; promptState: string; prompt: string }) => {
-        const target = dataList.value.find((row) => row.id === item.id);
+        const target = findAssetInTree(dataList.value, item.id);
         if (target) {
           if (target.promptState === "生成中" && item.promptState !== "生成中") hasCompleted = true;
-          target.promptState = item.promptState;
-          if (item.prompt !== undefined) target.prompt = item.prompt;
+          patchAssetInTree(item.id, { promptState: item.promptState, prompt: item.prompt });
         }
       });
     }
@@ -777,13 +851,11 @@ async function pollingPromptAssets() {
           projectId: project.value?.id,
           type: checkboxValue.value,
         });
-        (freshData as DataItem[]).forEach((fresh) => {
-          const target = dataList.value.find((row) => row.id === fresh.id);
-          if (target) target.historyImages = fresh.historyImages;
-        });
-        // 同步更新抽屉中的当前项
+        for (const fresh of flattenAssets(freshData as DataItem[])) {
+          patchAssetInTree(fresh.id, { historyImages: fresh.historyImages });
+        }
         if (currentItem.value) {
-          const freshCurrent = (freshData as DataItem[]).find((d) => d.id === currentItem.value!.id);
+          const freshCurrent = findAssetInTree(freshData as DataItem[], currentItem.value.id);
           if (freshCurrent) currentItem.value.historyImages = freshCurrent.historyImages;
         }
       } catch (e) {
@@ -803,11 +875,10 @@ async function pollingImageAssets() {
     let hasCompleted = false;
     if (Array.isArray(data) && data.length) {
       data.forEach((item: { id: number; state: string; filePath: string }) => {
-        const target = dataList.value.find((row) => row.id === item.id);
+        const target = findAssetInTree(dataList.value, item.id);
         if (target) {
           if (target.state === "生成中" && item.state !== "生成中") hasCompleted = true;
-          target.state = item.state;
-          if (item.filePath !== undefined) target.filePath = item.filePath;
+          patchAssetInTree(item.id, { state: item.state, filePath: item.filePath });
         }
       });
     }
@@ -818,13 +889,11 @@ async function pollingImageAssets() {
           projectId: project.value?.id,
           type: checkboxValue.value,
         });
-        (freshData as DataItem[]).forEach((fresh) => {
-          const target = dataList.value.find((row) => row.id === fresh.id);
-          if (target) target.historyImages = fresh.historyImages;
-        });
-        // 同步更新抽屉中的当前项
+        for (const fresh of flattenAssets(freshData as DataItem[])) {
+          patchAssetInTree(fresh.id, { historyImages: fresh.historyImages });
+        }
         if (currentItem.value) {
-          const freshCurrent = (freshData as DataItem[]).find((d) => d.id === currentItem.value!.id);
+          const freshCurrent = findAssetInTree(freshData as DataItem[], currentItem.value.id);
           if (freshCurrent) currentItem.value.historyImages = freshCurrent.historyImages;
         }
       } catch (e) {
@@ -844,11 +913,10 @@ async function pollingAudioBind() {
     let hasCompleted = false;
     if (Array.isArray(data) && data.length) {
       data.forEach((item: { id: number; audioBindState: string; filePath: string }) => {
-        const target = dataList.value.find((row) => row.id === item.id);
+        const target = findAssetInTree(dataList.value, item.id);
         if (target) {
           if (target.audioBindState === "生成中" && item.audioBindState !== "生成中") hasCompleted = true;
-          target.audioBindState = item.audioBindState;
-          if (item.filePath !== undefined) target.filePath = item.filePath;
+          patchAssetInTree(item.id, { audioBindState: item.audioBindState, filePath: item.filePath });
         }
       });
     }
@@ -858,13 +926,11 @@ async function pollingAudioBind() {
           projectId: project.value?.id,
           type: checkboxValue.value,
         });
-        (freshData as DataItem[]).forEach((fresh) => {
-          const target = dataList.value.find((row) => row.id === fresh.id);
-          if (target) target.relepedAudio = fresh.relepedAudio;
-        });
-        // 同步更新抽屉中的当前项
+        for (const fresh of flattenAssets(freshData as DataItem[])) {
+          patchAssetInTree(fresh.id, { relepedAudio: fresh.relepedAudio });
+        }
         if (currentItem.value) {
-          const freshCurrent = (freshData as DataItem[]).find((d) => d.id === currentItem.value!.id);
+          const freshCurrent = findAssetInTree(freshData as DataItem[], currentItem.value.id);
           if (freshCurrent) currentItem.value.relepedAudio = freshCurrent.relepedAudio;
         }
       } catch (e) {
@@ -1048,6 +1114,23 @@ async function selectAudio() {
       height: 100%;
       display: flex;
       flex-direction: column;
+      &.sonCard {
+        margin-left: 20px;
+        width: calc(100% - 20px);
+        border-left: 3px solid var(--td-brand-color-light);
+      }
+      .nameRow {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .tierTag {
+        flex-shrink: 0;
+      }
       :deep(.t-card__body) {
         flex: 1;
         min-height: 0;

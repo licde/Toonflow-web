@@ -1,8 +1,8 @@
 {
   "extends": "@vue/tsconfig/tsconfig.dom.json",
-  "include": ["src/**/*", "src/**/*.vue"],
+  "include": ["src/**/*", "src/**/*.vue", "src/types/*.d.ts"],
   "compilerOptions": {
-    "ignoreDeprecations": "6.0",
+    "ignoreDeprecations": "5.0",
     "composite": true,
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
     "esModuleInterop": true,
@@ -12,5 +12,14 @@
       "@/*": ["./src/*"]
     }
   },
-  "exclude": ["node_modules", "dist", "coverage", "**/*.test.ts", "src/**/__tests__/*"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "coverage",
+    "**/*.test.ts",
+    "src/**/__tests__/*",
+    "**/* copy/**",
+    "**/* copy.*",
+    "**/* copy.vue"
+  ]
 }

@@ -7,16 +7,38 @@ import { TDesignResolver } from "@tdesign-vue-next/auto-import-resolver";
 import { viteSingleFile } from "vite-plugin-singlefile";
 import postcsspxtoviewport from "postcss-px-to-viewport";
 
+// electron 发布需要单文件 HTML；日常构建可用 BUILD_TARGET=web 走分包模式（更快、更省内存）
+const isElectronBuild = process.env.BUILD_TARGET !== "web";
+
 export default defineConfig({
   base: "./",
-  build: {
-    assetsInlineLimit: Infinity,
-    rollupOptions: {
-      output: {
-        inlineDynamicImports: true,
+  build: isElectronBuild
+    ? {
+        assetsInlineLimit: Infinity,
+        rollupOptions: {
+          output: {
+            inlineDynamicImports: true,
+          },
+        },
+      }
+    : {
+        sourcemap: false,
+        chunkSizeWarningLimit: 2000,
+        rollupOptions: {
+          output: {
+            manualChunks(id) {
+              if (!id.includes("node_modules")) return;
+              if (id.includes("monaco-editor")) return "monaco";
+              if (id.includes("md-editor-v3") || id.includes("codemirror")) return "markdown";
+              if (id.includes("tdesign-vue-next")) return "tdesign";
+              if (id.includes("@vue-flow")) return "vueflow";
+              if (id.includes("@webav")) return "webav";
+              if (id.includes("@icon-park")) return "icons";
+              if (id.includes("vue") || id.includes("pinia") || id.includes("vue-router")) return "vue-vendor";
+            },
+          },
+        },
       },
-    },
-  },
   plugins: [
     vue(),
     AutoImport({
@@ -42,7 +64,7 @@ export default defineConfig({
         }),
       ],
     }),
-    viteSingleFile(),
+    ...(isElectronBuild ? [viteSingleFile()] : []),
   ],
   resolve: {
     alias: {
@@ -58,31 +80,19 @@ export default defineConfig({
     postcss: {
       plugins: [
         postcsspxtoviewport({
-          // 要转化的单位
           unitToConvert: "px",
-          // UI设计稿的大小
           viewportWidth: 1600,
-          // 转换后的精度
           unitPrecision: 4,
-          // 转换后的单位
           viewportUnit: "rem",
-          // 字体转换后的单位
           fontViewportUnit: "rem",
-          // 能转换的属性，*表示所有属性，!border表示border不转
           propList: ["*"],
-          // 指定不转换为视窗单位的类名，
           selectorBlackList: ["ignore"],
-          // 最小转换的值，小于等于1不转
           minPixelValue: 1,
-          // 是否在媒体查询的css代码中也进行转换，默认false
           mediaQuery: true,
-          // 是否转换后直接更换属性值
           replace: true,
-          // 忽略某些文件夹下的文件或特定文件，例如 'node_modules' 下的文件
-          exclude: [],
-          // 包含那些文件或者特定文件
-          include: [],
-          // 是否处理横屏情况
+          // 仅处理业务样式，跳过 node_modules 避免构建极慢
+          exclude: [/node_modules/],
+          include: [/src/],
           landscape: false,
         }),
       ],

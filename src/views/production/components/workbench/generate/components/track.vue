@@ -18,47 +18,49 @@
         </div>
       </div>
       <div class="itemBox">
-        <div
-          class="item"
-          :class="{ active: index === activeTrackIndex }"
-          v-for="(track, index) in trackList"
-          :key="track.id"
-          @click="changeIndex(index)">
-          <t-checkbox
-            class="trackCheck"
-            :checked="track.id != null && checkedTrackIds.includes(track.id)"
-            @click.stop
-            @change="(val: boolean) => toggleCheck(track.id, val)" />
-          <t-tag class="indexTag" size="small">#{{ index + 1 }}</t-tag>
-          <t-tag class="selectTag" theme="success" size="small" v-if="track.selectVideoId">已选择</t-tag>
-          <!-- 优先展示选中视频的首帧 -->
-          <div class="thumbGroup" v-if="track.selectVideoId && getSelectedVideoSrc(track)">
-            <img
-              v-if="videoCoverMap[getSelectedVideoSrc(track)!]"
-              class="thumb selectedVideoThumb"
-              :src="videoCoverMap[getSelectedVideoSrc(track)!]"
-              draggable="false" />
-            <div v-else class="thumb placeholder c">
-              <i-video size="24" />
+        <VueDraggable v-model="trackList" item-key="id" :animation="150" class="trackDraggable" @end="onTrackReorder">
+          <div
+            class="item"
+            :class="{ active: index === activeTrackIndex }"
+            v-for="(track, index) in trackList"
+            :key="track.id"
+            @click="changeIndex(index)">
+            <t-checkbox
+              class="trackCheck"
+              :checked="track.id != null && checkedTrackIds.includes(track.id)"
+              @click.stop
+              @change="(val: boolean) => toggleCheck(track.id, val)" />
+            <t-tag class="indexTag" size="small">#{{ index + 1 }}</t-tag>
+            <t-tag class="selectTag" theme="success" size="small" v-if="track.selectVideoId">已选择</t-tag>
+            <!-- 优先展示选中视频的首帧 -->
+            <div class="thumbGroup" v-if="track.selectVideoId && getSelectedVideoSrc(track)">
+              <img
+                v-if="videoCoverMap[getSelectedVideoSrc(track)!]"
+                class="thumb selectedVideoThumb"
+                :src="videoCoverMap[getSelectedVideoSrc(track)!]"
+                draggable="false" />
+              <div v-else class="thumb placeholder c">
+                <i-video size="24" />
+              </div>
+            </div>
+            <!-- 无选中视频时展示参考素材缩略图 -->
+            <div class="thumbGroup" v-else-if="track.medias.some((m) => m.src || (m as any).fallbackAssetSrc)">
+              <template v-for="(m, i) in track.medias" :key="i">
+                <template v-if="m.src || (m as any).fallbackAssetSrc">
+                  <t-image fit="cover" v-if="m.fileType === 'image'" :src="m.src || (m as any).fallbackAssetSrc" class="thumb" />
+                  <div v-else class="thumb placeholder c">
+                    <i-volume-notice v-if="m.fileType === 'audio'" size="20" />
+                    <i-video v-else size="24" />
+                  </div>
+                </template>
+              </template>
+            </div>
+            <span v-else class="emptyTrack">{{ $t("workbench.generate.emptyTrack", { index: index + 1 }) }}</span>
+            <div class="deleteBtn" @click.stop="confirmDeleteTrack(index)">
+              <i-close size="14" />
             </div>
           </div>
-          <!-- 无选中视频时展示参考素材缩略图 -->
-          <div class="thumbGroup" v-else-if="track.medias.some((m) => m.src)">
-            <template v-for="(m, i) in track.medias" :key="i">
-              <template v-if="m.src">
-                <t-image fit="cover" v-if="m.fileType === 'image'" :src="m.src" class="thumb" />
-                <div v-else class="thumb placeholder c">
-                  <i-volume-notice v-if="m.fileType === 'audio'" size="20" />
-                  <i-video v-else size="24" />
-                </div>
-              </template>
-            </template>
-          </div>
-          <span v-else class="emptyTrack">{{ $t("workbench.generate.emptyTrack", { index: index + 1 }) }}</span>
-          <div class="deleteBtn" @click.stop="confirmDeleteTrack(index)">
-            <i-close size="14" />
-          </div>
-        </div>
+        </VueDraggable>
         <div class="item addItem c" @click="addTrack">
           <i-plus size="36"></i-plus>
         </div>
@@ -70,6 +72,7 @@
 <script setup lang="ts">
 import type { Ref } from "vue";
 import "@/views/production/components/workbench/type/type";
+import { VueDraggable } from "vue-draggable-plus";
 import axios from "@/utils/axios";
 import projectStore from "@/stores/project";
 import imageListCacheStore from "@/stores/imageListCache";
@@ -193,6 +196,18 @@ function confirmDeleteTrack(index: number) {
     },
   });
 }
+async function onTrackReorder() {
+  const trackIds = trackList.value.map((t) => t.id).filter((id): id is number => id != null);
+  if (!trackIds.length) return;
+  try {
+    await axios.post("/production/workbench/reorderTracks", {
+      scriptId: episodesId.value ?? 0,
+      trackIds,
+    });
+  } catch (e: any) {
+    window.$message.error(e?.message ?? "轨道排序保存失败");
+  }
+}
 async function addTrack() {
   const { data: modelData } = await axios.post("/modelSelect/getModelDetail", { modelId: props.modelParmas.model });
   const drMap = modelData.durationResolutionMap;
@@ -297,7 +312,9 @@ function getTrackUploadInfo(track: TrackItem, filterEmpty = false) {
       sources: (sources ?? "storyboard") as string,
     }));
   }
-  return track.medias.filter((m) => !filterEmpty || Boolean(m.src)).map(({ id, sources }) => ({ id, sources: (sources ?? "storyboard") as string }));
+  return track.medias
+    .filter((m) => !filterEmpty || Boolean(m.src) || Boolean((m as { fallbackAssetSrc?: string }).fallbackAssetSrc))
+    .map(({ id, sources }) => ({ id, sources: (sources ?? "storyboard") as string }));
 }
 const generateVideoLoad = ref(false);
 /** 批量为已勾选轨道生成视频 */
@@ -420,6 +437,14 @@ watch(
     &::-webkit-scrollbar-thumb {
       background: #696969;
       border-radius: 3px;
+    }
+    .trackDraggable {
+      display: flex;
+      flex-shrink: 0;
+      flex-wrap: nowrap;
+      gap: 10px;
+      height: 100%;
+      align-items: stretch;
     }
     .item {
       border-radius: 8px;

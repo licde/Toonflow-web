@@ -43,7 +43,7 @@ import { h, render } from "vue";
 import { Popup } from "tdesign-vue-next";
 import { Video, VolumeMute } from "@icon-park/vue-next";
 const props = defineProps<{
-  references?: { type: "image" | "video" | "audio" | "text"; src: string }[];
+  references?: { type: "image" | "video" | "audio" | "text"; src: string; label?: string }[];
   placeholder?: String;
 }>();
 const prompt = defineModel<string>({ default: "" });
@@ -79,6 +79,7 @@ function getTypeIndex(targetIndex: number): number {
 function getRefLabel(index: number): string {
   const ref = props.references?.[index];
   if (!ref) return "";
+  if (ref.label?.trim()) return ref.label;
   const typeIndex = getTypeIndex(index);
   switch (ref.type) {
     case "image":
