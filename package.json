@@ -8,7 +8,9 @@
     "build": "node scripts/generate-dts.mjs && vue-tsc --build && node scripts/vite-build.mjs web",
     "build:electron": "node scripts/generate-dts.mjs && vue-tsc --build && node scripts/vite-build.mjs electron",
     "build:fast": "node scripts/vite-build.mjs web",
-    "build-only": "vite build",
+    "build:profile": "node scripts/build-profile.mjs web",
+    "build-only": "node scripts/vite-build.mjs web",
+    "postinstall": "node scripts/fix-tdesign-icons.mjs && node scripts/fix-tdesign-packages.mjs",
     "type-check": "node scripts/generate-dts.mjs && vue-tsc --build",
     "license": "node scripts/license.ts",
     "i18n:check": "node scripts/findUnusedI18n.ts"
@@ -28,6 +30,7 @@
     "clsx": "^2.1.1",
     "dayjs": "^1.11.19",
     "js-confetti": "^0.13.1",
+    "jszip": "^3.10.1",
     "lodash": "^4.17.23",
     "mammoth": "^1.12.0",
     "md-editor-v3": "^6.4.0",

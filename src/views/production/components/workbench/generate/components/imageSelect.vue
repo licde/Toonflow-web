@@ -261,10 +261,14 @@ function clearImage(index: number) {
 function pickStoryboard(sb: StoryboardItem) {
   storyboardDialogVisible.value = false;
   const fileType = "image";
+  const fallbackSrc = (sb as { fallbackAssetSrcs?: string[] }).fallbackAssetSrcs?.[0];
+  const resolvedSrc = sb.src || fallbackSrc || "";
   const newItem = {
     fileType,
-    sources: "storyboard",
-    src: sb.src,
+    sources: "storyboard" as const,
+    src: sb.src || "",
+    fallbackAssetSrc: !sb.src && fallbackSrc ? fallbackSrc : undefined,
+    resolvedSrc: resolvedSrc || undefined,
     id: sb.id,
     prompt: sb.videoDesc ?? undefined,
     index: sb.index,

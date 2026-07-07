@@ -62,15 +62,27 @@
 - **语言**：TypeScript 5.6+
 - **状态管理**：Pinia 2.2+ (支持持久化)
 - **路由**：Vue Router 4.4+
-- **UI 组件库**：
-  - Ant Design Vue 4.2+
-  - Element Plus 2.13+
-  - VXE Table 4.17+
+- **UI 组件库**：TDesign Vue Next
 - **工具库**：
   - Axios - HTTP 请求
   - VueUse - Vue 组合式工具集
   - Day.js - 日期处理
   - Mammoth - Word 文档解析
+  - Monaco Editor - 代码编辑
+  - md-editor-v3 - Markdown 编辑
+  - @vue-flow - 流程图编排
+  - @webav - 视频编辑
+
+## 构建命令
+
+| 命令 | 说明 |
+|------|------|
+| `yarn dev` | 开发服务器 |
+| `yarn build:fast` | Web 分包构建（跳过类型检查，日常最快） |
+| `yarn build` | 完整构建（类型检查 + Web 分包） |
+| `yarn build:electron` | Electron 单文件 HTML 构建 |
+| `yarn build:profile` | 构建并输出 `build-profile.json` 耗时报告 |
+| `yarn type-check` | 仅类型检查 |
 
 ---
 

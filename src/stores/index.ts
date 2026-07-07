@@ -1,4 +1,4 @@
-import axios from "@/utils/axios";
+import { projectApi, scriptApi } from "@/api";
 
 export default defineStore(
   "index",
@@ -19,9 +19,9 @@ export default defineStore(
 
     //设置当前项目
     async function setProjectById(id: number) {
-      const res = await axios.post("/project/getSingleProject", { id: id });
+      const res = await projectApi.getProjectById(id);
       project.value = res.data[0];
-      const scriptData = await axios.post("/script/getScrptApi", { projectId: id });
+      const scriptData = await scriptApi.getScriptByProjectId(id);
       currentScriptId.value = scriptData.data?.id || null;
     }
 

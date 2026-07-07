@@ -23,8 +23,8 @@
             :class="{ active: activeIndex === index }"
             @mousedown.prevent="selectReference(index)">
             <t-image v-if="item.type === 'image'" :src="item.src" fit="cover" class="ref-popup-img" />
-            <i-video v-else-if="item.type === 'video'" class="ref-popup-icon" />
-            <i-volume-mute v-else-if="item.type === 'audio'" class="ref-popup-icon" />
+            <Video v-else-if="item.type === 'video'" class="ref-popup-icon" />
+            <VolumeMute v-else-if="item.type === 'audio'" class="ref-popup-icon" />
             <span v-else class="ref-popup-text">文</span>
             <!-- 按类型分别计数 -->
             <span class="reference-label">{{ getRefLabel(index) }}</span>
@@ -43,7 +43,7 @@ import { h, render } from "vue";
 import { Popup } from "tdesign-vue-next";
 import { Video, VolumeMute } from "@icon-park/vue-next";
 const props = defineProps<{
-  references?: { type: "image" | "video" | "audio" | "text"; src: string; label?: string }[];
+  references?: { type: "image" | "video" | "audio" | "text"; src: string; label?: string; lockCode?: string }[];
   placeholder?: String;
 }>();
 const prompt = defineModel<string>({ default: "" });
@@ -92,8 +92,14 @@ function getRefLabel(index: number): string {
       return $t("workbench.production.editImage.textRef", { index: typeIndex });
   }
 }
+function findRefIndexByLockCode(lockCode: string): number {
+  const refs = props.references ?? [];
+  for (let i = 0; i < refs.length; i++) {
+    if (refs[i]?.lockCode === lockCode) return i;
+  }
+  return -1;
+}
 /**
- * 根据类型前缀 + 类型序号，反查全局 index
  * 用于 renderPromptToEditor 解析序列化字符串
  */
 function findRefIndexByTypeAndOrder(typePrefix: string, order: number): number {
@@ -157,8 +163,8 @@ function createRefTag(index: number): HTMLSpanElement {
 function renderPromptToEditor(text: string) {
   if (!editorRef.value) return;
   editorRef.value.innerHTML = "";
-  // 匹配 @图N、@视频N、@音频N、@文本N 或换行
-  const regex = /@(图|图片|视频|音频|文本)(\d+)|\n/g;
+  // 匹配 @图N、@资产:CODE、@视频N、@音频N、@文本N 或换行
+  const regex = /@(?:资产:([A-Za-z0-9_-]+(?::[\u4e00-\u9fa5A-Za-z0-9_-]+)?)|(图|图片|视频|音频|文本)(\d+))|\n/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(text)) !== null) {
@@ -167,9 +173,18 @@ function renderPromptToEditor(text: string) {
     }
     if (match[0] === "\n") {
       editorRef.value.appendChild(document.createElement("br"));
+    } else if (match[1]) {
+      const globalIndex = findRefIndexByLockCode(match[1]);
+      if (globalIndex !== -1) {
+        editorRef.value.appendChild(createRefTag(globalIndex));
+        editorRef.value.appendChild(document.createTextNode("\u200B"));
+        editorRef.value.appendChild(document.createTextNode(" "));
+      } else {
+        editorRef.value.appendChild(document.createTextNode(match[0]));
+      }
     } else {
-      const typePrefix = match[1];
-      const order = Number(match[2]);
+      const typePrefix = match[2];
+      const order = Number(match[3]);
       const globalIndex = findRefIndexByTypeAndOrder(typePrefix, order);
       if (globalIndex !== -1) {
         editorRef.value.appendChild(createRefTag(globalIndex));

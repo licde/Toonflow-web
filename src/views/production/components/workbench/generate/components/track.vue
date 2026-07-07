@@ -78,6 +78,13 @@ import projectStore from "@/stores/project";
 import imageListCacheStore from "@/stores/imageListCache";
 import JSZip from "jszip";
 import settingStore from "@/stores/setting";
+import {
+  buildRefSlots,
+  buildUploadInfoFromMedias,
+  sortMediasForRef,
+  inferMediaSource,
+  resolveMediaSrc,
+} from "@/utils/refSlotUtils";
 
 const { otherSetting } = storeToRefs(settingStore());
 const { project } = storeToRefs(projectStore());
@@ -258,19 +265,28 @@ async function batchDownloadVideo(): Promise<void> {
 const generateTextLoad = ref(false);
 function batchGenText() {
   generateTextLoad.value = true;
-  const trackData: any[] = [];
-  trackList.value.forEach((track, index) => {
+  const trackData: Array<{
+    trackId: number;
+    info: { id: number; sources: string }[];
+    refSlots: Array<{ slot: number; source: string; id: number; label: string; lockCode?: string }>;
+  }> = [];
+  const activeTrackId = trackList.value[activeTrackIndex.value]?.id;
+  trackList.value.forEach((track) => {
     if (!checkedTrackIds.value.includes(track.id)) return;
     const trackId = track.id;
-    let info = [];
-    if (props.modelParmas.mode == "text") {
-      info = track?.medias.map(({ id, sources }) => ({ id, sources }));
-    } else {
-      info = getTrackUploadInfo(track);
-    }
+    const medias =
+      track.id === activeTrackId
+        ? sortMediasForRef(props.imageList as UploadItem[])
+        : sortMediasForRef((track.medias ?? []) as UploadItem[]);
+    const refSlots = buildRefSlots(medias);
+    const info = buildUploadInfoFromMedias(medias, props.modelParmas.mode).map(({ id, sources }) => ({
+      id,
+      sources,
+    }));
     trackData.push({
       trackId,
       info: info.filter((i) => typeof i.id === "number" && !isNaN(i.id)),
+      refSlots: refSlots.map(({ slot, source, id, label, lockCode }) => ({ slot, source, id, label, lockCode })),
     });
     track.state = "生成中";
   });
@@ -307,14 +323,17 @@ function getTrackUploadInfo(track: TrackItem, filterEmpty = false) {
 
   if (track.id === activeTrackId) {
     const items = props.imageList as UploadItem[];
-    return (filterEmpty ? items.filter((item) => Boolean(item.src)) : items).map(({ id, sources }) => ({
-      id,
-      sources: (sources ?? "storyboard") as string,
+    return (filterEmpty ? items.filter((item) => Boolean(resolveMediaSrc(item))) : items).map((item) => ({
+      id: item.id!,
+      sources: (item.sources ?? inferMediaSource(item)) as string,
     }));
   }
   return track.medias
-    .filter((m) => !filterEmpty || Boolean(m.src) || Boolean((m as { fallbackAssetSrc?: string }).fallbackAssetSrc))
-    .map(({ id, sources }) => ({ id, sources: (sources ?? "storyboard") as string }));
+    .filter((m) => !filterEmpty || Boolean(resolveMediaSrc(m)))
+    .map((m) => ({
+      id: m.id!,
+      sources: (m.sources ?? inferMediaSource(m)) as string,
+    }));
 }
 const generateVideoLoad = ref(false);
 /** 批量为已勾选轨道生成视频 */

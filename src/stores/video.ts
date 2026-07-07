@@ -1,4 +1,4 @@
-import axios from "@/utils/axios";
+import { videoApi } from "@/api";
 import { ref, computed, watch, nextTick } from "vue";
 
 // 图片项
@@ -95,7 +95,7 @@ export default defineStore(
           scriptId: scriptId,
           specifyIds: specifyIds,
         };
-        const { data } = await axios.post("/video/getVideo", reqBodyObj);
+        const { data } = await videoApi.getVideos(reqBodyObj);
 
         if (specifyIds.length > 0) {
           // 部分更新：只更新指定ID的结果状态
@@ -156,7 +156,7 @@ export default defineStore(
     // 从后端获取视频配置列表
     async function fetchVideoConfigs(scriptId: number) {
       try {
-        const { data } = await axios.post("/video/getVideoConfigs", { scriptId });
+        const { data } = await videoApi.getVideoConfigs(scriptId);
         if (data && Array.isArray(data)) {
           // 过滤掉当前脚本的旧配置
           videoConfigs.value = [];
@@ -243,7 +243,7 @@ export default defineStore(
     async function removeConfig(configId: number) {
       // 调用后端接口删除配置（包括文件和视频）
       try {
-        await axios.post("/video/deleteVideoConfig", { id: configId });
+        await videoApi.deleteVideoConfig(configId);
       } catch (error) {
         console.error("删除配置失败:", error);
         throw error;
@@ -279,7 +279,7 @@ export default defineStore(
         config.images.forEach((img) => videoImgs.push(img.filePath));
       }
       // 调用后端接口
-      const { data } = await axios.post("/video/generateVideo", {
+      const { data } = await videoApi.generateVideo({
         projectId: config.projectId,
         scriptId: config.scriptId,
         mode: config.mode,

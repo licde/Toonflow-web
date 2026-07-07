@@ -101,7 +101,7 @@ import { useLocalStorage } from "@vueuse/core";
 import { useI18n } from "vue-i18n";
 import JSConfetti from "js-confetti";
 import settingStore from "@/stores/setting";
-import { languageList, cachedLocale } from "@/locales";
+import { languageList, switchLocale } from "@/locales";
 const { showSetting, activeMenu, isElectron } = storeToRefs(settingStore());
 
 const { locale } = useI18n();
@@ -109,9 +109,9 @@ const langOptions = languageList.map((item) => ({
   content: item.label,
   value: item.value,
 }));
-const handleChangeLang = (data: any) => {
+const handleChangeLang = async (data: { value: string }) => {
+  await switchLocale(data.value);
   locale.value = data.value;
-  cachedLocale.value = data.value;
 };
 
 const guideDone = useLocalStorage("helloGuideDone", false);

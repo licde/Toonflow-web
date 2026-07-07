@@ -1,4 +1,4 @@
-import axios from "@/utils/axios";
+import { scriptApi } from "@/api";
 import projectStore from "@/stores/project";
 import settingStore from "@/stores/setting";
 import { useChat } from "@/utils/useChat";
@@ -67,7 +67,7 @@ function makeScriptAgentStore(projectId: string) {
         );
 
         async function setPlanData() {
-          await axios.post("/scriptAgent/setPlanData", { projectId: projectId, agentType: "scriptAgent", data: planData.value });
+          await scriptApi.saveScriptAgentPlan(projectId, planData.value);
         }
 
         const thinkLevel = ref(0);

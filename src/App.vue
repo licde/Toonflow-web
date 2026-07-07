@@ -12,10 +12,10 @@
 
 <script setup lang="ts">
 import settingStore from "@/stores/setting";
-import { merge } from "lodash";
-import zhConfig from "tdesign-vue-next/es/locale/zh_CN";
-import enConfig from "tdesign-vue-next/es/locale/en_US";
-import { cachedLocale, languageList } from "@/locales";
+import merge from "lodash/merge";
+import zhConfig from "tdesign-vue-next/lib/locale/zh_CN";
+import enConfig from "tdesign-vue-next/lib/locale/en_US";
+import { cachedLocale, languageList, switchLocale } from "@/locales";
 import { initTheme } from "@/utils/theme";
 import { type GlobalConfigProvider } from "tdesign-vue-next";
 import { useI18n } from "vue-i18n";
@@ -23,6 +23,7 @@ import { useI18n } from "vue-i18n";
 const { locale } = useI18n();
 const { baseUrl, isElectron } = storeToRefs(settingStore());
 import { config } from "md-editor-v3";
+import "md-editor-v3/lib/style.css";
 
 const loading = ref(true);
 
@@ -39,6 +40,7 @@ watch(
 );
 
 onBeforeMount(() => {
+  if (!import.meta.env.DEV) return;
   document.addEventListener("keydown", function (event) {
     if (event.key === "F8") {
       event.preventDefault();
@@ -119,7 +121,7 @@ async function getPort() {
   try {
     const language = navigator.language;
     if (language && languageList.some((item) => item.value === language)) {
-      cachedLocale.value = language;
+      await switchLocale(language);
       locale.value = language;
     }
   } catch (e) {

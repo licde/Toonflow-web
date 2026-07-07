@@ -70,12 +70,12 @@
     </div>
   </div>
   <hello />
-  <setting />
+  <setting v-if="showSetting" />
 </template>
 
 <script setup lang="ts">
 import axios from "@/utils/axios";
-import setting from "@/components/setting/index.vue";
+const setting = defineAsyncComponent(() => import("@/components/setting/index.vue"));
 import hello from "@/components/hello.vue";
 import projectStore from "@/stores/project";
 const { project } = storeToRefs(projectStore());

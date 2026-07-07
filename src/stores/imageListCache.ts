@@ -1,5 +1,5 @@
 import "@/views/production/components/workbench/type/type";
-import axios from "@/utils/axios";
+import { productionApi } from "@/api";
 
 /**
  * 图片列表缓存 Pinia Store
@@ -79,7 +79,7 @@ export default defineStore(
       });
       if (needResolve.length) {
         try {
-          const { data } = await axios.post("/production/workbench/getFileUrl", {
+          const { data } = await productionApi.getWorkbenchFileUrl({
             items: needResolve.map((item) => ({ id: item.id, sources: item.sources })),
           });
           // axios 拦截器已返回 response.data，后端可能再包一层 { data: { ... } }

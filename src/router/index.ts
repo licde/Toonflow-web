@@ -55,10 +55,14 @@ const router = createRouter({
           path: "/assets",
           component: () => import("@/views/assets/index.vue"),
         },
-        {
-          path: "/test",
-          component: () => import("@/views/test/index.vue"),
-        },
+        ...(import.meta.env.DEV
+          ? [
+              {
+                path: "/test",
+                component: () => import("@/views/test/index.vue"),
+              },
+            ]
+          : []),
       ],
     },
     {

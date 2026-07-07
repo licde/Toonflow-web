@@ -3,6 +3,7 @@
     <div class="referenceImage">
       <div class="uploadBtn">
         <imageSelect :mode="modelParmas.mode as VideoMode" v-model="imageList" :storyboard-list="storyboardList" />
+        <t-button size="small" variant="text" @click="resetReferenceStrip">重置参考条带</t-button>
       </div>
     </div>
     <div class="modelSelect">
@@ -17,6 +18,9 @@
             </t-button>
           </template>
           <div class="promptData fc">
+            <div v-if="currentTrack.promptHint && !currentTrack.prompt?.includes('@图')" class="promptHint">
+              {{ currentTrack.promptHint }}
+            </div>
             <div class="promptInput" @focusout="handlePromptBlur">
               <promptEditor v-model="currentTrack.prompt" :references="references" :placeholder="$t('workbench.generate.promptPlaceholder')" />
             </div>
@@ -63,6 +67,7 @@ import {
   buildUploadInfoFromMedias,
   resolveMediaSrc,
   inferMediaSource,
+  findAllOrphanRefs,
 } from "@/utils/refSlotUtils";
 
 const { project } = storeToRefs(projectStore());
@@ -305,6 +310,21 @@ async function getGenerateData() {
 
   modelParmas.value.duration = clampDuration(data.trackList?.[activeTrackIndex.value]?.duration);
 }
+async function resetReferenceStrip() {
+  const pid = project.value?.id;
+  const sid = episodesId.value;
+  const trackId = currentTrack.value?.id;
+  if (pid == null || sid == null || trackId == null) return;
+  const { data } = await axios.post("/production/workbench/getGenerateData", {
+    projectId: pid,
+    scriptId: sid,
+  });
+  const serverTrack = data.trackList.find((t: TrackItem) => t.id === trackId);
+  if (!serverTrack?.medias?.length) return;
+  removeCache(pid, sid, trackId);
+  currentTrack.value.medias = serverTrack.medias as TrackMedia[];
+  window.$message.success("已重置参考条带");
+}
 /** 提示词失焦时保存到后端 */
 function handlePromptBlur() {
   const trackId = trackList.value[activeTrackIndex.value]?.id;
@@ -317,19 +337,12 @@ async function genText() {
   const track = currentTrack.value;
   if (track.id == null || track.state === "生成中") return;
   const currentTrackId = track.id;
-  const rawMedias = (track.medias ?? []) as UploadItem[];
-  const refSlots = buildRefSlots(rawMedias);
-  let info: { id: number; sources: string }[] = [];
-  if (modelParmas.value.mode == "text") {
-    info = rawMedias
-      .filter((item) => typeof item.id === "number")
-      .map(({ id, sources, type }) => ({ id: id!, sources: sources ?? inferMediaSource({ sources, type }) }));
-  } else {
-    info = buildUploadInfoFromMedias(rawMedias, modelParmas.value.mode).map(({ id, sources }) => ({
-      id,
-      sources,
-    }));
-  }
+  const medias = imageList.value;
+  const refSlots = buildRefSlots(medias);
+  const info = buildUploadInfoFromMedias(medias, modelParmas.value.mode).map(({ id, sources }) => ({
+    id,
+    sources,
+  }));
   track.state = "生成中";
   try {
     const { data } = await axios.post("/production/workbench/generateVideoPrompt", {
@@ -348,7 +361,6 @@ async function genText() {
   }
 }
 function trackChange(prevIndex?: number) {
-  // 切换前：将旧轨道的 imageList 保存到缓存
   if (prevIndex != null) {
     const prevTrack = trackList.value[prevIndex];
     const pid = project.value?.id;
@@ -372,6 +384,14 @@ function trackChange(prevIndex?: number) {
     imageList.value = imageList.value.slice(0, 1);
   }
   modelParmas.value.duration = clampDuration(trackList.value?.[activeTrackIndex.value]?.duration);
+  const track = trackList.value[activeTrackIndex.value];
+  if (track?.prompt) {
+    const slots = buildRefSlots(imageList.value);
+    const orphans = findAllOrphanRefs(track.prompt, slots.length, slots);
+    if (orphans.length) {
+      window.$message.warning(`参考条带已变化，提示词含无效引用 ${orphans.join("、")}，请重新生成`);
+    }
+  }
 }
 /** 监听当前轨道的 medias 变化，实时同步到缓存与后端 */
 let mediasPersistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -587,6 +607,14 @@ onUnmounted(() => {
         }
         .promptData {
           width: 100%;
+          flex: 1;
+          min-height: 0;
+          .promptHint {
+            font-size: 12px;
+            color: var(--td-text-color-placeholder);
+            margin-bottom: 6px;
+            line-height: 1.4;
+          }
           flex: 1;
           min-height: 0;
           display: flex;

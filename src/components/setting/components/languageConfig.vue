@@ -20,16 +20,16 @@
 
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
-import { languageList, cachedLocale } from "@/locales";
+import { languageList, cachedLocale, switchLocale } from "@/locales";
 
 const selectedLang = ref<string>(cachedLocale.value ?? "zh-CN");
 
 const { locale } = useI18n();
 
-function selectLang(val: string) {
+async function selectLang(val: string) {
+  await switchLocale(val);
   locale.value = val;
   selectedLang.value = val;
-  cachedLocale.value = val;
   window.$message?.success($t("settings.language.msg.saved"));
 }
 </script>

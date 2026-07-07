@@ -1,17 +1,15 @@
 import { MessagePlugin } from "tdesign-vue-next";
-
-import i18n from "@/locales";
-const { t } = i18n.global;
+import type { I18n } from "vue-i18n";
 
 declare global {
   interface Window {
     $message: typeof MessagePlugin;
     $port: string;
-    $t: typeof t;
+    $t: I18n["global"]["t"];
   }
 }
 
-window.$message = MessagePlugin;
-
-
-window.$t = t;
+export function initGlobal(i18n: I18n) {
+  window.$message = MessagePlugin;
+  window.$t = i18n.global.t;
+}

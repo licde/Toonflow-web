@@ -53,7 +53,7 @@
 <script setup lang="ts">
 import projectDialog from "./components/projectDialog.vue";
 import dayjs from "dayjs";
-import axios from "@/utils/axios";
+import { projectApi } from "@/api";
 import projectStore from "@/stores/project";
 import imageListCacheStore from "@/stores/imageListCache";
 
@@ -77,7 +77,7 @@ const editProjectData = ref<{
 } | null>(null);
 
 async function getAllProject() {
-  axios.post("/project/getProject").then(({ data }) => {
+  projectApi.getProjects().then(({ data }) => {
     allProject.value = data;
   });
 }
@@ -101,14 +101,10 @@ async function openProject(projectId: string | undefined) {
 
   try {
     if (item.imageModel) {
-      await axios.post("/modelSelect/getModelDetail", {
-        modelId: item.imageModel,
-      });
+      await projectApi.getModelDetail(item.imageModel);
     }
     if (item.videoModel) {
-      await axios.post("/modelSelect/getModelDetail", {
-        modelId: item.videoModel,
-      });
+      await projectApi.getModelDetail(item.videoModel);
     }
   } catch {
     window.$message.warning($t("workbench.project.msg.modelProviderDisabled"));
@@ -153,8 +149,8 @@ function editProjectFn(data: {
   imageQuality: "1K" | "2K" | "4K" | "";
   mode: string;
 }) {
-  axios
-    .post("/project/editProject", data)
+  projectApi
+    .editProject(data)
     .then(() => {
       window.$message.success($t("workbench.project.msg.editSuccess"));
       getAllProject();
@@ -177,8 +173,8 @@ function addProjectFn(data: {
   imageQuality: string;
   mode: string;
 }) {
-  axios
-    .post("/project/addProject", data)
+  projectApi
+    .addProject(data)
     .then(() => {
       window.$message.success($t("workbench.project.msg.addSuccess"));
       getAllProject();
@@ -195,8 +191,8 @@ function delProjcer(projectId: string | undefined) {
     confirmBtn: $t("workbench.project.msg.deleteConfirm"),
     cancelBtn: $t("workbench.project.msg.deleteCancel"),
     onConfirm: () => {
-      axios
-        .post("/project/delProject", { id: projectId })
+      projectApi
+        .deleteProject(projectId)
         .then(() => {
           clearProjectCache(projectId!);
           window.$message.success($t("workbench.project.msg.deleteSuccess"));

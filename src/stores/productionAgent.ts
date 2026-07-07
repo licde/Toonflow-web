@@ -1,4 +1,4 @@
-import axios from "@/utils/axios";
+import { productionApi, agentsApi } from "@/api";
 import projectStore from "@/stores/project";
 import settingStore from "@/stores/setting";
 import { useChat } from "@/utils/useChat";
@@ -217,23 +217,16 @@ function makeProductionAgentStore(projectId: string) {
     );
 
     async function setFlowData(scriptId?: number) {
-      await axios.post("/production/saveFlowData", {
-        projectId: projectId,
-        data: flowData.value,
-        episodesId: scriptId || episodesId.value,
-      });
+      await productionApi.saveFlowData(projectId, scriptId || episodesId.value, flowData.value);
     }
 
     async function getFlowData() {
-      const { data } = await axios.post("/production/getFlowData", {
-        projectId: projectId,
-        episodesId: episodesId.value,
-      });
+      const { data } = await productionApi.getFlowData(projectId, episodesId.value);
       flowData.value = data;
     }
     async function batchGenerateStoryboard(allIds: number[], compulsory: boolean = false) {
       try {
-        const { data } = await axios.post("/production/storyboard/batchGenerateImage", {
+        const { data } = await productionApi.batchGenerateStoryboard({
           scriptId: episodesId.value,
           projectId: projectId,
           storyboardIds: allIds,
@@ -270,7 +263,7 @@ function makeProductionAgentStore(projectId: string) {
         }
       });
       try {
-        const { data } = await axios.post("/production/assets/batchGenerateAssetsImage", {
+        const { data } = await productionApi.batchGenerateAssets({
           assetIds: allIds,
           projectId: projectId,
           scriptId: episodesId.value,
@@ -324,9 +317,7 @@ function makeProductionAgentStore(projectId: string) {
       if (ids.length === 0 || assetsPollingInFlight) return;
       assetsPollingInFlight = true;
       try {
-        const { data } = await axios.post("/production/assets/pollingImage", {
-          ids: ids,
-        });
+        const { data } = await productionApi.pollAssetsImages(ids);
         if (!data || data.length === 0) return;
         const records = data as Array<{ id: number; state: string; src?: string; errorReason?: string; prompt?: string }>;
         records.forEach((record) => {
@@ -389,9 +380,7 @@ function makeProductionAgentStore(projectId: string) {
       if (ids.length === 0 || storyboardPollingInFlight) return;
       storyboardPollingInFlight = true;
       try {
-        const { data } = await axios.post("/production/storyboard/pollingImage", {
-          ids: ids,
-        });
+        const { data } = await productionApi.pollStoryboardImages(ids);
         if (!data || data.length === 0) return;
         const records = data as Array<{ id: number; state: string; src?: string; reason?: string }>;
         records.forEach((record) => {
@@ -451,7 +440,7 @@ function makeProductionAgentStore(projectId: string) {
       socket.value!.emit("updateContext", ctx);
     }
     async function addStoryboardInfo(items: any[]) {
-      const { data } = await axios.post("/production/storyboard/batchAddStoryboardInfo", {
+      const { data } = await productionApi.batchAddStoryboardInfo({
         scriptId: episodesId.value,
         data: items,
         projectId: projectId,
@@ -472,7 +461,7 @@ function makeProductionAgentStore(projectId: string) {
     const loadingHistory = ref(false);
     async function getHistory() {
       loadingHistory.value = true;
-      const { data } = await axios.post(`/agents/getMemory`, {
+      const { data } = await agentsApi.getAgentMemory({
         projectId: projectId,
         episodesId: episodesId.value,
         agentType: "productionAgent",

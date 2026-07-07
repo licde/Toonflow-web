@@ -1,7 +1,15 @@
 /**
  * 全局变量类型声明
  */
+/// <reference types="vite/client" />
+/// <reference path="./auto-imports.d.ts" />
+/// <reference path="./components.d.ts" />
+
 declare const $t: (key: string, ...args: any[]) => string;
+
+interface Window {
+  $electron?: unknown;
+}
 
 /**
  * Vite 环境变量类型定义
@@ -12,8 +20,6 @@ interface ImportMetaEnv {
   readonly DEV: boolean;
   readonly PROD: boolean;
   readonly SSR: boolean;
-  // 可以根据需要添加自定义环境变量
-  [key: string]: any;
 }
 
 interface ImportMeta {
@@ -234,17 +240,4 @@ interface EventType {
   }[];
   novelBack: string;
   emotionalIndex?: number;
-}
-
-// Vite 环境变量类型声明
-interface ImportMetaEnv {
-  BASE_URL: string | undefined;
-  readonly VITE_TYPE: string;
-  readonly VITE_BASE_URL: string;
-  readonly VITE_WS_URL: string;
-  // 在这里添加其他环境变量
-}
-
-interface ImportMeta {
-  readonly env: ImportMetaEnv;
 }

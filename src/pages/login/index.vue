@@ -49,16 +49,16 @@ import logo from "@/assets/logo.png";
 import axios from "@/utils/axios";
 import settingStore from "@/stores/setting";
 import { storeToRefs } from "pinia";
-import { languageList, cachedLocale } from "@/locales";
+import { languageList, switchLocale } from "@/locales";
 
 const { locale } = useI18n();
 const langOptions = languageList.map((item) => ({
   content: item.label,
   value: item.value,
 }));
-const handleChangeLang = (data) => {
+const handleChangeLang = async (data) => {
+  await switchLocale(data.value);
   locale.value = data.value;
-  cachedLocale.value = data.value;
 };
 
 const store = settingStore();
