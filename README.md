@@ -59,10 +59,11 @@
 
 | 命令 | 场景 | 说明 |
 |------|------|------|
-| `yarn build:fast` | 日常验证 | lite 模式，最快（~7 min） |
-| `yarn build:fast:ultra` | 冒烟测试 | 不压缩 JS/CSS |
+| `yarn build:fast` | **日常最快** | ultra：stub 重依赖 + 不压缩（**~3 min**） |
+| `yarn build:fast:lite` | 编辑器联调 | 真实 monaco/md-editor，仍不压缩 |
 | `yarn build:full:fast` | **预发布推荐** | 并行 type-check + release-fast |
-| `yarn build` | CI / 正式发布 | 并行 type-check + 完整 release |
+| `yarn build` | 默认预发布 | 同 `build:full:fast` |
+| `yarn build:release` | 正式上线 | 完整 JS+CSS 压缩 |
 | `yarn build:electron` | Electron | 单文件打包 |
 | `yarn build:profile` | 耗时分析 | 生成 `build-profile.json` |
 

@@ -18,15 +18,21 @@ export function parseBuildArgs(argv = process.argv.slice(2)) {
   return { target, mode, ultra, lite, release, releaseFast, serial };
 }
 
-export function viteBuildEnv({ target, mode, ultra, release, releaseFast }) {
+export function viteBuildEnv({ target, mode, ultra, lite, release, releaseFast }) {
+  const skipHeavy = ultra;
+  const skipMinify = ultra || lite || releaseFast;
+  const skipRem = ultra || lite || releaseFast;
+
   return {
     BUILD_TARGET: target,
     NODE_ENV: "production",
     BUILD_MODE: mode,
     BUILD_ULTRA: ultra ? "1" : "0",
-    BUILD_LITE: release || releaseFast ? "0" : "1",
+    BUILD_LITE: lite ? "1" : "0",
     BUILD_RELEASE_FAST: releaseFast ? "1" : "0",
-    BUILD_SKIP_REM: ultra ? "1" : "0",
+    BUILD_SKIP_HEAVY: skipHeavy ? "1" : "0",
+    BUILD_SKIP_MINIFY: skipMinify ? "1" : "0",
+    BUILD_SKIP_REM: skipRem ? "1" : "0",
   };
 }
 
