@@ -1,5 +1,5 @@
 import { ref } from "vue";
-import { io, Socket } from "socket.io-client";
+import type { Socket } from "socket.io-client";
 
 export interface SocketEventMap {
   //scriptAgent
@@ -21,12 +21,13 @@ export function useSocket<T extends SocketEventMap = SocketEventMap>(url = "http
   let socket: Socket | null = null;
   const connected = ref(false);
 
-  const connect = () => {
+  const connect = async () => {
     if (socket) {
       if (socket.disconnected) socket.connect();
       return;
     }
 
+    const { io } = await import("socket.io-client");
     socket = io(url, {
       transports: ["websocket", "polling"],
       reconnection: true,

@@ -97,7 +97,7 @@ const { otherSetting } = storeToRefs(settingStore());
 import { LoadingPlugin } from "tdesign-vue-next";
 import axios from "@/utils/axios";
 import parseScript from "@/utils/parseScript";
-import mammoth from "mammoth";
+import { loadMammoth } from "@/utils/loadMammoth";
 import type { UploadFile, PrimaryTableCol, TableRowData } from "tdesign-vue-next";
 import projectStore from "@/stores/project";
 const { project } = storeToRefs(projectStore());
@@ -182,6 +182,7 @@ async function readFile(file: File): Promise<string> {
   if (file.type === "text/plain") {
     return new TextDecoder().decode(buffer);
   }
+  const mammoth = await loadMammoth();
   const result = await mammoth.extractRawText({ arrayBuffer: buffer });
   return result.value;
 }

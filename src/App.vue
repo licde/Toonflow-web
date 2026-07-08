@@ -12,7 +12,6 @@
 
 <script setup lang="ts">
 import settingStore from "@/stores/setting";
-import merge from "lodash/merge";
 import zhConfig from "tdesign-vue-next/lib/locale/zh_CN";
 import enConfig from "tdesign-vue-next/lib/locale/en_US";
 import { cachedLocale, languageList, switchLocale } from "@/locales";
@@ -22,8 +21,6 @@ import { useI18n } from "vue-i18n";
 
 const { locale } = useI18n();
 const { baseUrl, isElectron } = storeToRefs(settingStore());
-import { config } from "md-editor-v3";
-import "md-editor-v3/lib/style.css";
 
 const loading = ref(true);
 
@@ -71,10 +68,6 @@ async function handleLinkClick(event: MouseEvent) {
   return false;
 }
 
-onMounted(() => {
-  (window as any).handleLinkClick = handleLinkClick;
-});
-
 async function getPort() {
   await nextTick();
   await nextTick();
@@ -91,32 +84,8 @@ async function getPort() {
 
   loading.value = false;
 
-  config({
-    markdownItConfig(md) {
-      // 自定义链接渲染
-      const defaultRender =
-        md.renderer.rules.link_open ||
-        function (tokens, idx, options, env, self) {
-          return self.renderToken(tokens, idx, options);
-        };
-      md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
-        const token = tokens[idx];
-        const href = token.attrGet("href");
-
-        if (href) {
-          // 添加 target="_blank" 在新窗口打开
-          token.attrSet("target", "_blank");
-          token.attrSet("rel", "noopener noreferrer");
-
-          // 或者添加自定义点击事件的标识
-          token.attrSet("data-link", href);
-          token.attrSet("onclick", "return handleLinkClick(event)");
-        }
-
-        return defaultRender(tokens, idx, options, env, self);
-      };
-    },
-  });
+  const { setupMdEditor } = await import("@/utils/mdEditorSetup");
+  void setupMdEditor(handleLinkClick);
 
   try {
     const language = navigator.language;
@@ -129,17 +98,12 @@ async function getPort() {
   }
 }
 
-const tdesignLocaleMap: Record<string, object> = {
+const tdesignLocaleMap: Record<string, GlobalConfigProvider> = {
   "zh-CN": zhConfig,
   en: enConfig,
 };
 
-const customConfig: GlobalConfigProvider = {
-  calendar: {},
-  table: {},
-  pagination: {},
-};
-const globalConfig = computed<GlobalConfigProvider>(() => merge({}, tdesignLocaleMap[cachedLocale.value] || zhConfig, customConfig));
+const globalConfig = computed<GlobalConfigProvider>(() => tdesignLocaleMap[cachedLocale.value] || zhConfig);
 
 onBeforeMount(() => {
   initTheme();

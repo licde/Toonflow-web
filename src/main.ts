@@ -9,20 +9,16 @@ import { initGlobal } from "@/utils/global";
 import "tdesign-vue-next/es/style/index.css";
 import { LoadingDirective, LoadingPlugin } from "tdesign-vue-next";
 
-import { Log } from "@webav/av-cliper";
-Log.setLogLevel(Log.warn);
-
 import "./assets/main.scss";
 
 import { imageOptimizer } from "@/utils/imageOptimizer";
-import { registerIconPark } from "@/utils/registerIconPark";
-import "@icon-park/vue-next/styles/index.css";
 
 async function bootstrap() {
   const i18n = await setupI18n();
   initGlobal(i18n);
 
   const app = createApp(App);
+  const { registerIconPark } = await import("@/utils/registerIconPark");
   registerIconPark(app);
   app.use(imageOptimizer);
   app.use(createPinia().use(piniaPluginPersistedstate));

@@ -51,6 +51,12 @@ interface TrackItem {
   reason?: string;
   selectVideoId?: number | null;
   medias: TrackMedia[];
+  refSlots?: Array<{ slot: number; source: string; id: number; label: string; lockCode?: string; resolvedSrc: string }>;
+  promptHint?: string;
+  promptStale?: boolean;
+  promptPresets?: Record<string, { ready: boolean; generatedAt?: number }>;
+  activeRoute?: string;
+  inputHash?: string;
   videoList: VideoItem[];
   duration: number;
 }

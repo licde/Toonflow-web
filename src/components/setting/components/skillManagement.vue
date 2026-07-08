@@ -21,7 +21,7 @@
       </div>
 
       <div v-if="activeEntry" class="previewWrap">
-        <MdPreview :theme="mdEditorTheme" :modelValue="content" :toolbars="[]" preview-only preview-theme="github" code-theme="atom" />
+        <AsyncMdPreview :theme="mdEditorTheme" :modelValue="content" :toolbars="[]" preview-only preview-theme="github" code-theme="atom" />
       </div>
 
       <t-empty v-else :description="$t('setting.skillManagement.selectOnTheLeft')" />
@@ -36,14 +36,15 @@
       :confirm-on-enter="false"
       :on-confirm="onSave"
       :loading="isSaving">
-      <MdEditor :theme="mdEditorTheme" v-model="draft" :toolbars="mdToolbars" preview-theme="github" code-theme="atom" style="height: 72vh" />
+      <AsyncMdEditor :theme="mdEditorTheme" v-model="draft" :toolbars="mdToolbars" preview-theme="github" code-theme="atom" style="height: 72vh" />
     </t-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { MdEditor, MdPreview } from "md-editor-v3";
+import AsyncMdEditor from "@/components/async/AsyncMdEditor.vue";
+import AsyncMdPreview from "@/components/async/AsyncMdPreview.vue";
 import type { ToolbarNames } from "md-editor-v3";
 import settingStore from "@/stores/setting";
 const { mdEditorTheme } = storeToRefs(settingStore());

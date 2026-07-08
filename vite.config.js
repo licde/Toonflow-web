@@ -1,4 +1,5 @@
 import { fileURLToPath, URL } from "node:url";
+import { createRequire } from "node:module";
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import AutoImport from "unplugin-auto-import/vite";
@@ -6,16 +7,68 @@ import Components from "unplugin-vue-components/vite";
 import { TDesignResolver } from "@tdesign-vue-next/auto-import-resolver";
 import { viteSingleFile } from "vite-plugin-singlefile";
 import postcsspxtoviewport from "postcss-px-to-viewport";
+const require = createRequire(import.meta.url);
+const isLiteBuild = process.env.BUILD_LITE === "1";
+const skipRem = process.env.BUILD_SKIP_REM === "1";
+function getVisualizerPlugins() {
+    if (process.env.ANALYZE !== "1" && process.env.ANALYZE !== "true")
+        return [];
+    try {
+        const { visualizer } = require("rollup-plugin-visualizer");
+        return [
+            visualizer({
+                filename: "dist/stats.html",
+                gzipSize: true,
+                brotliSize: true,
+                open: false,
+            }),
+        ];
+    }
+    catch {
+        console.warn("[vite] rollup-plugin-visualizer 未安装，跳过包体积分析插件");
+        return [];
+    }
+}
+function getPostcssPlugins() {
+    if (skipRem)
+        return [];
+    return [
+        postcsspxtoviewport({
+            unitToConvert: "px",
+            viewportWidth: 1600,
+            unitPrecision: 1,
+            viewportUnit: "rem",
+            fontViewportUnit: "rem",
+            propList: ["*"],
+            selectorBlackList: ["ignore", /^\.t-/],
+            minPixelValue: 2,
+            mediaQuery: false,
+            replace: true,
+            exclude: [/node_modules/],
+            // 仅 pages + production 业务样式；main.scss 多为 CSS 变量，跳过以缩短构建
+            include: [/src\/pages\//, /src\/views\/production\//],
+            landscape: false,
+        }),
+    ];
+}
 // electron 发布需要单文件 HTML；日常构建可用 BUILD_TARGET=web 走分包模式（更快、更省内存）
 const isElectronBuild = process.env.BUILD_TARGET !== "web";
-const tdesignResolverOptions = { library: "vue-next" };
-const tdesignChatResolverOptions = { library: "chat" };
+const tdesignResolverOptions = { library: "vue-next", importStyle: false };
 const webBuild = {
-    target: "es2020",
+    target: "es2022",
     sourcemap: false,
     reportCompressedSize: false,
-    chunkSizeWarningLimit: 2000,
+    chunkSizeWarningLimit: 5000,
+    cssCodeSplit: true,
+    cssMinify: isLiteBuild ? false : "esbuild",
+    minify: "esbuild",
+    modulePreload: { polyfill: false },
+    esbuild: {
+        legalComments: "none",
+        drop: isLiteBuild ? [] : ["debugger"],
+    },
     rollupOptions: {
+        maxParallelFileOps: 32,
         output: {
             manualChunks(id) {
                 if (!id.includes("node_modules"))
@@ -24,6 +77,10 @@ const webBuild = {
                     return "monaco";
                 if (id.includes("md-editor-v3") || id.includes("codemirror"))
                     return "markdown";
+                if (id.includes("tdesign-icons-vue-next"))
+                    return "tdesign-icons";
+                if (id.includes("@tdesign-vue-next/chat"))
+                    return "tdesign-chat";
                 if (id.includes("tdesign-vue-next"))
                     return "tdesign";
                 if (id.includes("@vue-flow"))
@@ -36,6 +93,10 @@ const webBuild = {
                     return "mammoth";
                 if (id.includes("vue-clip-track"))
                     return "clip-track";
+                if (id.includes("dayjs"))
+                    return "dayjs";
+                if (id.includes("vue-i18n"))
+                    return "i18n";
                 if (id.includes("@icon-park"))
                     return "icons";
                 if (id.includes("vue") || id.includes("pinia") || id.includes("vue-router"))
@@ -45,80 +106,70 @@ const webBuild = {
     },
 };
 const iconsLib = fileURLToPath(new URL("./node_modules/tdesign-icons-vue-next/lib", import.meta.url));
-export default defineConfig({
-    base: "./",
-    build: isElectronBuild
-        ? {
-            assetsInlineLimit: Infinity,
-            rollupOptions: {
-                output: {
-                    inlineDynamicImports: true,
+const iconParkLib = fileURLToPath(new URL("./node_modules/@icon-park/vue-next/lib/icons", import.meta.url));
+export default defineConfig(({ command }) => {
+    const isServe = command === "serve";
+    return {
+        base: "./",
+        cacheDir: "node_modules/.vite",
+        build: isElectronBuild
+            ? {
+                assetsInlineLimit: Infinity,
+                rollupOptions: {
+                    output: {
+                        inlineDynamicImports: true,
+                    },
                 },
-            },
-        }
-        : webBuild,
-    plugins: [
-        vue(),
-        AutoImport({
-            dts: "src/types/auto-imports.d.ts",
-            imports: ["vue", "pinia", "vue-router"],
-            resolvers: [TDesignResolver(tdesignResolverOptions), TDesignResolver(tdesignChatResolverOptions)],
-        }),
-        Components({
-            dts: "src/types/components.d.ts",
-            resolvers: [TDesignResolver(tdesignResolverOptions), TDesignResolver(tdesignChatResolverOptions)],
-        }),
-        ...(isElectronBuild ? [viteSingleFile()] : []),
-    ],
-    resolve: {
-        alias: [
-            { find: /^tdesign-icons-vue-next\/esm/, replacement: iconsLib },
-            { find: "@", replacement: fileURLToPath(new URL("./src", import.meta.url)) },
+            }
+            : webBuild,
+        plugins: [
+            vue({
+                template: {
+                    compilerOptions: {
+                        comments: false,
+                    },
+                },
+            }),
+            AutoImport({
+                dts: isServe ? "src/types/auto-imports.d.ts" : false,
+                imports: ["vue", "pinia", "vue-router"],
+                resolvers: [TDesignResolver(tdesignResolverOptions)],
+            }),
+            Components({
+                dts: isServe ? "src/types/components.d.ts" : false,
+                dirs: ["src/components"],
+                resolvers: [TDesignResolver(tdesignResolverOptions)],
+            }),
+            ...(isElectronBuild ? [viteSingleFile()] : []),
+            ...getVisualizerPlugins(),
         ],
-    },
-    optimizeDeps: {
-        include: [
-            "vue",
-            "vue-router",
-            "pinia",
-            "axios",
-            "tdesign-vue-next",
-            "@vue-flow/core",
-            "md-editor-v3",
-            "monaco-editor",
-        ],
-    },
-    css: {
-        preprocessorOptions: {
-            scss: {
-                api: "modern-compiler",
-            },
-        },
-        postcss: {
-            plugins: [
-                postcsspxtoviewport({
-                    unitToConvert: "px",
-                    viewportWidth: 1600,
-                    unitPrecision: 4,
-                    viewportUnit: "rem",
-                    fontViewportUnit: "rem",
-                    propList: ["*"],
-                    selectorBlackList: ["ignore"],
-                    minPixelValue: 1,
-                    mediaQuery: true,
-                    replace: true,
-                    exclude: [/node_modules/],
-                    // 仅对需要 rem 适配的目录做 px 转换，缩短构建时间
-                    include: [/src\/pages\//, /src\/views\/production\//, /src\/assets\/main\.scss/],
-                    landscape: false,
-                }),
+        resolve: {
+            alias: [
+                { find: /^tdesign-icons-vue-next\/esm/, replacement: iconsLib },
+                { find: /^@icon-park\/vue-next\/es\/icons/, replacement: iconParkLib },
+                { find: "@", replacement: fileURLToPath(new URL("./src", import.meta.url)) },
             ],
         },
-    },
-    server: {
-        port: 50188,
-        warmup: {
-            clientFiles: ["./src/main.ts", "./src/App.vue", "./src/router/index.ts"],
+        optimizeDeps: {
+            include: ["vue", "vue-router", "pinia", "axios", "tdesign-vue-next", "@vue-flow/core"],
+            exclude: ["monaco-editor", "monaco-editor-vue3", "mammoth"],
         },
-    },
+        css: {
+            preprocessorOptions: {
+                scss: {
+                    api: "modern-compiler",
+                    silenceDeprecations: ["legacy-js-api"],
+                },
+            },
+            postcss: {
+                plugins: getPostcssPlugins(),
+            },
+        },
+        server: {
+            port: 50188,
+            warmup: {
+                clientFiles: ["./src/main.ts", "./src/App.vue", "./src/router/index.ts"],
+            },
+        },
+    };
 });

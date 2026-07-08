@@ -75,14 +75,22 @@
 
 ## 构建命令
 
-| 命令 | 说明 |
-|------|------|
-| `yarn dev` | 开发服务器 |
-| `yarn build:fast` | Web 分包构建（跳过类型检查，日常最快） |
-| `yarn build` | 完整构建（类型检查 + Web 分包） |
-| `yarn build:electron` | Electron 单文件 HTML 构建 |
-| `yarn build:profile` | 构建并输出 `build-profile.json` 耗时报告 |
-| `yarn type-check` | 仅类型检查 |
+| 命令 | 模式 | 预期耗时 | 用途 |
+|------|------|----------|------|
+| `yarn dev` | — | — | 开发服务器 |
+| `yarn build:fast` | lite | ~7 min | 日常验证（无 CSS 压缩） |
+| `yarn build:fast:ultra` | ultra | ~3–5 min | 本地冒烟（无 rem/无压缩） |
+| `yarn build:release:fast` | release-fast | ~8 min | 预发布（JS 压缩 + rem，无 CSS 压缩） |
+| `yarn build:release` | release | ~10–12 min | 最终发布产物 |
+| `yarn build:full:fast` | 并行 tsc + release-fast | ~8 min | **发布前推荐** |
+| `yarn build` | 并行 tsc + release | ~12 min | CI / 严格发布 |
+| `yarn build:electron` | Electron 单文件 | — | 桌面端 |
+| `yarn build:profile` | lite 基准 | — | 写 `build-profile.json` |
+| `yarn build:profile:fast` | release-fast 基准 | — | 耗时对比 |
+| `yarn build:analyze` | lite + 可视化 | — | `dist/stats.html` |
+| `yarn type-check` | vue-tsc --build | ~3 min | 类型检查 |
+
+详细性能优化说明见 [docs/PERFORMANCE_OPTIMIZATION.md](./docs/PERFORMANCE_OPTIMIZATION.md)。
 
 ---
 

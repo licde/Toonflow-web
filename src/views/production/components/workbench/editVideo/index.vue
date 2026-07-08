@@ -104,6 +104,10 @@
 </template>
 
 <script setup lang="ts">
+import { setupWebavLog } from "@/utils/webavSetup";
+
+setupWebavLog();
+
 import mediaLibrary from "./mediaLibrary.vue";
 import videoPreview from "./videoPreview.vue";
 import propertyPanel from "./propertyPanel.vue";

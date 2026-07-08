@@ -8,7 +8,7 @@
     </div>
     <div class="storyboardList">
       <t-empty v-if="!storyboardTable" style="margin-top: 16px"></t-empty>
-      <MdPreview v-else v-model="storyboardTable" :theme="mdEditorTheme" />
+      <AsyncMdPreview v-else v-model="storyboardTable" :theme="mdEditorTheme" />
     </div>
   </t-card>
 
@@ -24,7 +24,7 @@
     :close-on-overlay-click="false"
     placement="center"
     attach="body">
-    <MdEditor
+    <AsyncMdEditor
       v-model="editContent"
       :theme="mdEditorTheme"
       :toolbars="toolbars"
@@ -39,7 +39,8 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { Handle, Position } from "@vue-flow/core";
-import { MdEditor, MdPreview } from "md-editor-v3";
+import AsyncMdEditor from "@/components/async/AsyncMdEditor.vue";
+import AsyncMdPreview from "@/components/async/AsyncMdPreview.vue";
 import type { ToolbarNames } from "md-editor-v3";
 import settingStore from "@/stores/setting";
 import productionAgentStore from "@/stores/productionAgent";

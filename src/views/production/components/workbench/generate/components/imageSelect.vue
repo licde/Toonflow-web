@@ -94,7 +94,7 @@
       width="800px"
       placement="center">
       <div class="storyboardGrid">
-        <div class="storyboardItem" v-for="sb in storyboardList" :key="sb.id" @click="pickStoryboard(sb)">
+        <div class="storyboardItem" v-for="sb in storyboardList" :key="sb.id" :class="{ disabled: !sb.src }" @click="pickStoryboard(sb)">
           <div class="imageTitleWrap" v-if="sb?.index != null">
             {{ `P${sb?.index + 1}` }}
           </div>
@@ -258,17 +258,17 @@ function clearImage(index: number) {
   imageList.value = list;
 }
 /** 分镜弹窗选中回调 */
-function pickStoryboard(sb: StoryboardItem) {
+function pickStoryboard(sb: StoryboardItem & { canReference?: boolean; fallbackAssetSrcs?: string[] }) {
   storyboardDialogVisible.value = false;
+  if (!sb.src) {
+    window.$message.warning("该分镜尚无正式分镜图，不可作为参考引用（资产兜底图不能写入参考条带）");
+    return;
+  }
   const fileType = "image";
-  const fallbackSrc = (sb as { fallbackAssetSrcs?: string[] }).fallbackAssetSrcs?.[0];
-  const resolvedSrc = sb.src || fallbackSrc || "";
   const newItem = {
     fileType,
     sources: "storyboard" as const,
-    src: sb.src || "",
-    fallbackAssetSrc: !sb.src && fallbackSrc ? fallbackSrc : undefined,
-    resolvedSrc: resolvedSrc || undefined,
+    src: sb.src,
     id: sb.id,
     prompt: sb.videoDesc ?? undefined,
     index: sb.index,
@@ -431,9 +431,9 @@ function splitImage(index: number) {
       transition:
         border-color 0.2s,
         box-shadow 0.2s;
-      &:hover {
-        border-color: var(--td-brand-color);
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+      &.disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
       }
       img {
         width: 100%;

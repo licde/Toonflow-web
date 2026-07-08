@@ -3,7 +3,7 @@
 export type RefMediaSource = "assets" | "storyboard";
 
 export type RefMediaInput = {
-  id?: number;
+  id?: number | null;
   sources?: RefMediaSource | string;
   src?: string;
   fallbackAssetSrc?: string;
@@ -27,6 +27,10 @@ export type RefSlot = {
 };
 
 export function resolveMediaSrc(item: RefMediaInput): string {
+  // 与后端 refSlotBuilder 对齐：storyboard 仅认 src，资产可用 fallbackAssetSrc
+  if (item.sources === "storyboard") {
+    return (item.src || "").trim();
+  }
   return (item.resolvedSrc || item.src || item.fallbackAssetSrc || "").trim();
 }
 

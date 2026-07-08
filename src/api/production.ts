@@ -31,3 +31,11 @@ export function batchAddStoryboardInfo(payload: Record<string, unknown>) {
 export function getWorkbenchFileUrl(payload: Record<string, unknown>) {
   return http.post("/production/workbench/getFileUrl", payload);
 }
+
+export function switchTrackRoute(payload: { trackId: number; routeKey: string }) {
+  return http.post<{ prompt?: string }>("/production/workbench/switchTrackRoute", payload);
+}
+
+export function presetEpisodeVideo(payload: { projectId: number; scriptId: number; respectImport?: boolean }) {
+  return http.post("/production/workbench/presetEpisodeVideo", payload);
+}

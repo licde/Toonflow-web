@@ -3,8 +3,8 @@
     <Splitpanes class="default-theme data f">
       <Pane :size="30" :min-size="15" class="operate">
         <div class="box pr">
-          <t-chat-list :clear-history="false">
-            <t-chat-message
+          <ChatList :clear-history="false">
+            <ChatMessage
               v-for="message in messages"
               :key="message.id"
               :message="message"
@@ -13,9 +13,9 @@
               :variant="message.role === 'user' ? 'base' : 'outline'"
               :handleActions="message.role === 'user' ? {} : handleActions"
               :status="message.status"
-              allowContentSegmentCustom></t-chat-message>
-          </t-chat-list>
-          <t-chat-sender
+              allowContentSegmentCustom></ChatMessage>
+          </ChatList>
+          <ChatSender
             class="inputBox"
             :disabled="status === 'pending' || status === 'streaming'"
             v-model="inputValue"
@@ -76,7 +76,7 @@
                 </template>
               </t-popup>
             </template>
-          </t-chat-sender>
+          </ChatSender>
           <i-dot class="dot" theme="outline" :fill="connected ? 'green' : 'red'" />
           <transition name="fade">
             <div v-if="forceGenerateVisible" class="forceGenerateMask">
@@ -106,7 +106,7 @@
             </t-tab-panel> -->
             <t-tab-panel :value="1" :label="$t('workbench.scriptAgent.storySkeleton')">
               <div class="panelContent">
-                <MdPreview
+                <AsyncMdPreview
                   v-if="planData.storySkeleton"
                   :modelValue="planData.storySkeleton"
                   :theme="themeSetting.mode === 'auto' ? undefined : themeSetting.mode" />
@@ -115,7 +115,7 @@
             </t-tab-panel>
             <t-tab-panel :value="2" :label="$t('workbench.scriptAgent.adaptationStrategy')">
               <div class="panelContent">
-                <MdPreview
+                <AsyncMdPreview
                   v-if="planData.adaptationStrategy"
                   :modelValue="planData.adaptationStrategy"
                   :theme="themeSetting.mode === 'auto' ? undefined : themeSetting.mode" />
@@ -190,7 +190,7 @@
         </div>
         <div class="scriptEditField">
           <label>{{ $t("workbench.scriptAgent.content") }}</label>
-          <MdEditor
+          <AsyncMdEditor
             v-model="scriptEditData.content"
             :theme="themeSetting.mode === 'auto' ? undefined : themeSetting.mode"
             :toolbars="toolbars"
@@ -205,15 +205,16 @@
 </template>
 
 <script setup lang="ts">
-import { MdEditor } from "md-editor-v3";
+import AsyncMdEditor from "@/components/async/AsyncMdEditor.vue";
+import AsyncMdPreview from "@/components/async/AsyncMdPreview.vue";
 import type { ToolbarNames } from "md-editor-v3";
-import { MdPreview } from "md-editor-v3";
 import settingStore from "@/stores/setting";
 const { themeSetting } = storeToRefs(settingStore());
 import { Splitpanes, Pane } from "splitpanes";
 import "splitpanes/dist/splitpanes.css";
 import axios from "@/utils/axios";
 import type { ChatMessagesData } from "@tdesign-vue-next/chat";
+import { ChatList, ChatMessage, ChatSender } from "@tdesign-vue-next/chat";
 import projectStore from "@/stores/project";
 const { project } = storeToRefs(projectStore());
 import editMdPreivew from "@/components/editMdPreivew.vue";
