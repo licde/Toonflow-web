@@ -102,7 +102,7 @@
             </t-select>
           </t-form-item>
           <t-form-item :label="$t('promptManage.prompt')">
-            <MdEditor
+            <AsyncMdEditor
               :theme="themeSetting.mode === 'auto' ? 'light' : themeSetting.mode"
               v-model="editingPrompt.data"
               :toolbars="promptToolbars"
@@ -121,7 +121,7 @@
 import { ref } from "vue";
 import type { TableProps } from "tdesign-vue-next";
 import axios from "@/utils/axios";
-import { MdEditor, MdPreview } from "md-editor-v3";
+import AsyncMdEditor from "@/components/async/AsyncMdEditor.vue";
 import type { ToolbarNames } from "md-editor-v3";
 import settingStore from "@/stores/setting";
 const { themeSetting } = storeToRefs(settingStore());

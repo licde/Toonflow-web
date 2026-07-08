@@ -13,7 +13,7 @@
     </div>
     <div class="show">
       <t-dialog v-model:visible="visible" :header="$t('workbench.project.dialog.prompt.title')" width="70%" :close-on-overlay-click="false" @confirm="onConfirm" top="9vh">
-        <MdEditor :theme="themeSetting.mode === 'auto' ? 'light' : themeSetting.mode"
+        <AsyncMdEditor :theme="themeSetting.mode === 'auto' ? 'light' : themeSetting.mode"
           v-model="promptData.data"
           :toolbars="promptToolbars"
           :footers="[]"
@@ -27,7 +27,7 @@
 
 <script setup lang="ts">
 import axios from "@/utils/axios";
-import { MdEditor } from "md-editor-v3";
+import AsyncMdEditor from "@/components/async/AsyncMdEditor.vue";
 import type { ToolbarNames } from "md-editor-v3";
 import settingStore from "@/stores/setting";
 const { themeSetting } = storeToRefs(settingStore());

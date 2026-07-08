@@ -11,7 +11,7 @@
     :close-on-overlay-click="false"
     placement="center"
     attach="body">
-    <MdEditor
+    <AsyncMdEditor
       v-model="editContent"
       :theme="themeSetting.mode"
       :toolbars="toolbars"
@@ -24,7 +24,7 @@
 </template>
 
 <script setup lang="ts">
-import { MdEditor } from "md-editor-v3";
+import AsyncMdEditor from "@/components/async/AsyncMdEditor.vue";
 import type { ToolbarNames } from "md-editor-v3";
 import settingStore from "@/stores/setting";
 const { themeSetting } = storeToRefs(settingStore());

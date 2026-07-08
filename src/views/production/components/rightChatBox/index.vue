@@ -11,8 +11,8 @@
       </div>
     </div>
     <div class="chatBox" v-loading="loadingHistory">
-      <t-chat-list :clear-history="false">
-        <t-chat-message
+      <ChatList :clear-history="false">
+        <ChatMessage
           v-for="message in messages"
           :key="message.id"
           :message="message"
@@ -25,9 +25,9 @@
           <!-- <template #actionbar>
             <t-chat-actionbar :action-bar="['replay', 'copy']" />
           </template> -->
-        </t-chat-message>
-      </t-chat-list>
-      <t-chat-sender
+        </ChatMessage>
+      </ChatList>
+      <ChatSender
         class="inputBox"
         :disabled="status === 'pending' || status === 'streaming' || !connected"
         v-model="inputValue"
@@ -86,15 +86,15 @@
             </t-popup>
           </div>
         </template>
-      </t-chat-sender>
+      </ChatSender>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { useMousePressed, useMouse } from "@vueuse/core";
-import _ from "lodash";
 import axios from "@/utils/axios";
+import { ChatList, ChatMessage, ChatSender } from "@tdesign-vue-next/chat";
 import productionAgentStore from "@/stores/productionAgent";
 import projectStore from "@/stores/project";
 const { project } = storeToRefs(projectStore());

@@ -66,7 +66,7 @@
             <t-input v-model="localStorageForm.key" :placeholder="$t('settings.dev.localStorageKeyPlaceholder')" />
             <t-button variant="outline" @click="formatLocalStorageValue">{{ $t("settings.dev.format") }}</t-button>
           </div>
-          <CodeEditor v-model:value="localStorageForm.value" language="json" theme="vs-dark" :height="500" :options="localStorageEditorOptions" />
+          <AsyncMonacoEditor v-model:value="localStorageForm.value" language="json" theme="vs-dark" :height="500" :options="localStorageEditorOptions" />
         </div>
       </t-dialog>
     </t-form>
@@ -74,7 +74,7 @@
 </template>
 
 <script setup lang="ts">
-import { CodeEditor } from "monaco-editor-vue3";
+import AsyncMonacoEditor from "@/components/async/AsyncMonacoEditor.vue";
 import axios from "@/utils/axios";
 import { DialogPlugin } from "tdesign-vue-next";
 import settingStore from "@/stores/setting";

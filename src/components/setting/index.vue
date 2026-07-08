@@ -40,22 +40,22 @@
 import settingStore from "@/stores/setting";
 const { showSetting, activeMenu, needUpdate } = storeToRefs(settingStore());
 
-import uiConfig from "./components/uiConfig.vue";
-import languageConfig from "./components/languageConfig.vue";
-import requestConfig from "./components/requestConfig.vue";
-import loginConfig from "./components/loginConfig.vue";
-import agentConfog from "./components/agentConfog.vue";
-import dbConfig from "./components/dbConfig.vue";
-import otherConfig from "./components/otherConfig.vue";
-import about from "./components/about.vue";
-import logoutConfig from "./components/logoutConfig.vue";
-import vendorConfig from "./components/vendorConfig.vue";
-import memoryConfig from "./components/memoryConfig.vue";
-import fileManagement from "./components/fileManagement.vue";
-import skillManagement from "./components/skillManagement.vue";
-import devConfig from "./components/devConfig.vue";
-import promptManage from "./components/promptManage.vue";
-import modelMap from "./components/modelMap.vue";
+const uiConfig = defineAsyncComponent(() => import("./components/uiConfig.vue"));
+const languageConfig = defineAsyncComponent(() => import("./components/languageConfig.vue"));
+const requestConfig = defineAsyncComponent(() => import("./components/requestConfig.vue"));
+const loginConfig = defineAsyncComponent(() => import("./components/loginConfig.vue"));
+const agentConfog = defineAsyncComponent(() => import("./components/agentConfog.vue"));
+const dbConfig = defineAsyncComponent(() => import("./components/dbConfig.vue"));
+const otherConfig = defineAsyncComponent(() => import("./components/otherConfig.vue"));
+const about = defineAsyncComponent(() => import("./components/about.vue"));
+const logoutConfig = defineAsyncComponent(() => import("./components/logoutConfig.vue"));
+const vendorConfig = defineAsyncComponent(() => import("./components/vendorConfig.vue"));
+const memoryConfig = defineAsyncComponent(() => import("./components/memoryConfig.vue"));
+const fileManagement = defineAsyncComponent(() => import("./components/fileManagement.vue"));
+const skillManagement = defineAsyncComponent(() => import("./components/skillManagement.vue"));
+const devConfig = defineAsyncComponent(() => import("./components/devConfig.vue"));
+const promptManage = defineAsyncComponent(() => import("./components/promptManage.vue"));
+const modelMap = defineAsyncComponent(() => import("./components/modelMap.vue"));
 
 const menuItems = [
   { key: "ui", label: "settings.menu.ui", icon: "i-theme" },

@@ -55,6 +55,21 @@
 
 ---
 
+# ⚡ 构建命令
+
+| 命令 | 场景 | 说明 |
+|------|------|------|
+| `yarn build:fast` | 日常验证 | lite 模式，最快（~7 min） |
+| `yarn build:fast:ultra` | 冒烟测试 | 不压缩 JS/CSS |
+| `yarn build:full:fast` | **预发布推荐** | 并行 type-check + release-fast |
+| `yarn build` | CI / 正式发布 | 并行 type-check + 完整 release |
+| `yarn build:electron` | Electron | 单文件打包 |
+| `yarn build:profile` | 耗时分析 | 生成 `build-profile.json` |
+
+详细架构说明见 [docs/PERFORMANCE_OPTIMIZATION.md](./docs/PERFORMANCE_OPTIMIZATION.md)。
+
+---
+
 # 🌟 技术栈
 
 - **框架**：Vue 3.5+ (组合式 API)

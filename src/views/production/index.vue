@@ -9,7 +9,7 @@
     :nodes-draggable="!isSpacePressed"
     :nodes-connectable="!isSpacePressed"
     :elements-selectable="!isSpacePressed"
-    :only-render-visible-elements="false"
+    :only-render-visible-elements="true"
     :max-zoom="10"
     :min-zoom="0.1"
     :nodes-focusable="false"
@@ -108,14 +108,13 @@ import "@vue-flow/core/dist/style.css";
 import "@vue-flow/core/dist/theme-default.css";
 import "@vue-flow/controls/dist/style.css";
 //子node组件
-import scriptNode from "./node/script.vue";
-import scriptPlan from "./node/scriptPlan.vue";
-import assets from "./node/assets.vue";
-import storyboardTable from "./node/storyboardTable.vue";
-import storyboard from "./node/storyboard.vue";
-import workbench from "./node/workbench.vue";
-import poster from "./node/poster.vue";
-import rightChatBox from "./components/rightChatBox/index.vue";
+const scriptNode = defineAsyncComponent(() => import("./node/script.vue"));
+const scriptPlan = defineAsyncComponent(() => import("./node/scriptPlan.vue"));
+const assets = defineAsyncComponent(() => import("./node/assets.vue"));
+const storyboardTable = defineAsyncComponent(() => import("./node/storyboardTable.vue"));
+const storyboard = defineAsyncComponent(() => import("./node/storyboard.vue"));
+const workbench = defineAsyncComponent(() => import("./node/workbench.vue"));
+const rightChatBox = defineAsyncComponent(() => import("./components/rightChatBox/index.vue"));
 import { useLayout } from "./utils/dagre";
 import { useFlowBuilder } from "./utils/flowBuilder";
 import axios from "@/utils/axios";

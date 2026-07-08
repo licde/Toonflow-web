@@ -188,7 +188,7 @@
                 <div class="aiExtractInline">
                   <t-tabs :value="visualManualTabValue" size="medium" @change="(v) => (visualManualTabValue = v)">
                     <t-tab-panel v-for="tab in visualManualTabData" :key="tab.value" :value="tab.value" :label="tab.label">
-                      <MdEditor
+                      <AsyncMdEditor
                         v-model="tab.data"
                         :theme="themeSetting.mode"
                         :toolbars="promptToolbars"
@@ -259,7 +259,7 @@
                 <div class="aiExtractInline">
                   <t-tabs :value="directorManualTabValue" size="medium" @change="(v) => (directorManualTabValue = v)">
                     <t-tab-panel v-for="tab in directorManualTabData" :key="tab.value" :value="tab.value" :label="tab.label">
-                      <MdEditor
+                      <AsyncMdEditor
                         v-model="tab.data"
                         :theme="themeSetting.mode"
                         :toolbars="promptToolbars"
@@ -283,7 +283,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from "vue";
 import axios from "@/utils/axios";
-import { MdEditor } from "md-editor-v3";
+import AsyncMdEditor from "@/components/async/AsyncMdEditor.vue";
 import settingStore from "@/stores/setting";
 const { themeSetting } = storeToRefs(settingStore());
 import type { ToolbarNames } from "md-editor-v3";

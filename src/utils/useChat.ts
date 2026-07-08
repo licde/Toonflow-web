@@ -1,6 +1,6 @@
 // useChat.ts
 import { ref, shallowRef, onMounted, onUnmounted, computed } from "vue";
-import { io, Socket } from "socket.io-client";
+import type { Socket } from "socket.io-client";
 import type { ChatMessagesData, AIMessage, UserMessage, AIMessageContent, ChatMessageStatus } from "@tdesign-vue-next/chat";
 
 // Socket 事件类型定义
@@ -568,12 +568,13 @@ export function useChat(options: UseChatOptions) {
   };
 
   // 连接管理
-  const connect = () => {
+  const connect = async () => {
     if (socket.value?.connected || connecting.value) return;
 
     connecting.value = true;
 
     if (!socket.value) {
+      const { io } = await import("socket.io-client");
       socket.value = io(url, {
         transports: ["websocket", "polling"],
         reconnection: true,
@@ -598,7 +599,7 @@ export function useChat(options: UseChatOptions) {
 
   const reconnect = () => {
     disconnect();
-    setTimeout(connect, 100);
+    setTimeout(() => void connect(), 100);
   };
 
   // 发送方法
@@ -718,7 +719,7 @@ export function useChat(options: UseChatOptions) {
   // 生命周期
   if (manageLifecycle) {
     onMounted(() => {
-      if (autoConnect) connect();
+      if (autoConnect) void connect();
     });
 
     onUnmounted(() => {
@@ -727,7 +728,7 @@ export function useChat(options: UseChatOptions) {
       socket.value = null;
     });
   } else if (autoConnect) {
-    connect();
+    void connect();
   }
 
   return {

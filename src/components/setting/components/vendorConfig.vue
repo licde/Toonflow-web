@@ -41,7 +41,7 @@
             :message="$t('settings.vendor.msg.vendorNeedsUpdate')"
             style="margin-bottom: 12px" />
           <t-form-item>
-            <MdPreview v-model="currentVendor.description" :theme="themeSetting.mode" />
+            <AsyncMdPreview v-model="currentVendor.description" :theme="themeSetting.mode" />
           </t-form-item>
           <t-form-item v-for="input in requiredInputs" :key="input.key" :name="input.key">
             <template #label>
@@ -331,15 +331,15 @@
         </div>
       </div>
       <div class="editorWrapper">
-        <CodeEditor v-model:value="vendorCode" language="typescript" theme="vs-dark" :height="600" :options="editorOptions" />
+        <AsyncMonacoEditor v-model:value="vendorCode" language="typescript" theme="vs-dark" :height="600" :options="editorOptions" />
       </div>
     </t-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { MdPreview } from "md-editor-v3";
-import { CodeEditor } from "monaco-editor-vue3";
+import AsyncMdPreview from "@/components/async/AsyncMdPreview.vue";
+import AsyncMonacoEditor from "@/components/async/AsyncMonacoEditor.vue";
 import { DialogPlugin } from "tdesign-vue-next";
 import axios from "@/utils/axios";
 import VENDOR_CODE_TEMPLATE from "@/lib/vendorTemplate.ts?raw";
