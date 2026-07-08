@@ -29,10 +29,16 @@
           <i-editing class="icon" />
         </div>
       </t-tooltip>
+      <t-tooltip :content="$t('workbench.production.wb.structuredTitle')" placement="bottom" theme="light" destroyOnClose :showArrow="false">
+        <div class="item fc c" :class="{ active: activeMenu === 'structured' }" @click="changeMenu('structured')">
+          <i-file-text class="icon" />
+        </div>
+      </t-tooltip>
     </div>
     <div class="content">
       <preview v-if="activeMenu === 'preview'" />
       <generate v-if="activeMenu === 'generate'" @importVideo="handleBatchDownload" v-model="extractLines" />
+      <structured v-if="activeMenu === 'structured'" />
       <editVideo
         v-if="activeMenu === 'editVideo'"
         :initial-tracks="mockTracks"
@@ -57,6 +63,7 @@ import type { Ref } from "vue";
 import axios from "@/utils/axios";
 import preview from "./preview.vue";
 const generate = defineAsyncComponent(() => import("./generate/index.vue"));
+const structured = defineAsyncComponent(() => import("./structured/index.vue"));
 const editVideo = defineAsyncComponent(() => import("./editVideo/index.vue"));
 import { generateId, type Track } from "vue-clip-track";
 import type { MediaItem, AudioItem } from "./editVideo/utils/mediaData";
