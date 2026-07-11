@@ -80,6 +80,13 @@
             </template>
           </t-button>
         </t-tooltip>
+        <t-tooltip placement="bottom" theme="primary" :content="$t('workbench.production.importFixture.tooltip')">
+          <t-button variant="outline" style="margin-left: 8px" :disabled="!episodesId" @click="importFixtureVisible = true">
+            <template #icon>
+              <i-upload-one size="16" />
+            </template>
+          </t-button>
+        </t-tooltip>
         <i-loading-four class="spin" size="16" style="margin-left: 0.5rem" v-show="loading"></i-loading-four>
         <!-- <t-tooltip theme="primary" content="$t('workbench.production.autoLayoutTB')">
           <div class="item c" @click="layoutGraph('TB')">
@@ -96,6 +103,7 @@
     </div>
     <t-guide v-model="current" :steps="steps" @finish="() => (current = -1)" />
     <t-tag variant="outline" class="fps" v-if="!openShowVisible">{{ fps }}</t-tag>
+    <importTestFixture v-model:visible="importFixtureVisible" :project-id="Number(project?.id ?? 0)" :script-id="episodesId" />
   </VueFlow>
 </template>
 
@@ -115,6 +123,7 @@ const storyboardTable = defineAsyncComponent(() => import("./node/storyboardTabl
 const storyboard = defineAsyncComponent(() => import("./node/storyboard.vue"));
 const workbench = defineAsyncComponent(() => import("./node/workbench.vue"));
 const rightChatBox = defineAsyncComponent(() => import("./components/rightChatBox/index.vue"));
+const importTestFixture = defineAsyncComponent(() => import("./components/importTestFixture/index.vue"));
 import { useLayout } from "./utils/dagre";
 import { useFlowBuilder } from "./utils/flowBuilder";
 import axios from "@/utils/axios";
@@ -195,6 +204,7 @@ const { episodesId, flowData, status } = storeToRefs(productionAgentStore());
 provide("episodesId", episodesId);
 
 const loading = ref(false);
+const importFixtureVisible = ref(false);
 
 // 节点位置
 const nodePositions = ref<Record<string, { x: number; y: number }>>({

@@ -1566,7 +1566,21 @@
       "autoLayoutTB": "自动排版-上下布局",
       "getFlowData": "刷新工作区",
       "confirm": "切换剧集确认",
-      "confirmEpisodesSwitch": "当前任务仍在进行中，切换剧集会重连会话，是否继续切换？"
+      "confirmEpisodesSwitch": "当前任务仍在进行中，切换剧集会重连会话，是否继续切换？",
+      "importFixture": {
+        "tooltip": "导入测试 JSON",
+        "title": "导入测试数据",
+        "hint": "粘贴或上传 JSON。支持 flow-data-template.json 格式，或 { \"flowData\": {...}, \"package\": {...} } 合并格式。模板见 Toonflow-app/data/fixtures/",
+        "placeholder": "粘贴 flowData 或合并 JSON…",
+        "upload": "选择 JSON 文件",
+        "syncPackage": "同步 EpisodePackage",
+        "runCompile": "导入后执行 compileDryRun",
+        "confirm": "导入",
+        "success": "测试数据已导入",
+        "failed": "导入失败，请检查 JSON 格式",
+        "empty": "请先粘贴或选择 JSON",
+        "noEpisode": "请先选择剧集"
+      }
     },
     "task": {
       "title": "任务列表",

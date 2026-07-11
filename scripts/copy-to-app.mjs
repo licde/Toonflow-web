@@ -34,7 +34,9 @@ if (!fs.existsSync(distDir)) {
 let count = 0;
 for (const target of targets) {
   if (fs.existsSync(path.dirname(target))) {
-    if (fs.existsSync(target)) fs.rmSync(target, { recursive: true, force: true });
+    if (fs.existsSync(target)) {
+      fs.rmSync(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
     copyRecursive(distDir, target);
     count++;
     console.log(`[copy-to-app] ✓ ${distDir} → ${target}`);

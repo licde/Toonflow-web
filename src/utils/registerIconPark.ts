@@ -35,6 +35,13 @@ import FileText from "@icon-park/vue-next/lib/icons/FileText";
 import Film from "@icon-park/vue-next/lib/icons/Film";
 import FlashPayment from "@icon-park/vue-next/lib/icons/FlashPayment";
 import FolderOpen from "@icon-park/vue-next/lib/icons/FolderOpen";
+import FolderClose from "@icon-park/vue-next/lib/icons/FolderClose";
+import ViewList from "@icon-park/vue-next/lib/icons/ViewList";
+import Notebook from "@icon-park/vue-next/lib/icons/Notebook";
+import ColorFilter from "@icon-park/vue-next/lib/icons/ColorFilter";
+import PeoplesTwo from "@icon-park/vue-next/lib/icons/PeoplesTwo";
+import CarouselVideo from "@icon-park/vue-next/lib/icons/CarouselVideo";
+import Receive from "@icon-park/vue-next/lib/icons/Receive";
 import FullScreenOne from "@icon-park/vue-next/lib/icons/FullScreenOne";
 import Github from "@icon-park/vue-next/lib/icons/Github";
 import GithubOne from "@icon-park/vue-next/lib/icons/GithubOne";
@@ -117,6 +124,13 @@ const iconComponents: Record<string, Component> = {
   "i-film": Film,
   "i-flash-payment": FlashPayment,
   "i-folder-open": FolderOpen,
+  "i-folder-close": FolderClose,
+  "i-view-list": ViewList,
+  "i-notebook": Notebook,
+  "i-color-filter": ColorFilter,
+  "i-peoples-two": PeoplesTwo,
+  "i-carousel-video": CarouselVideo,
+  "i-receive": Receive,
   "i-full-screen-one": FullScreenOne,
   "i-github": Github,
   "i-github-one": GithubOne,

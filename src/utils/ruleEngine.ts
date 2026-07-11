@@ -54,6 +54,15 @@ export async function syncEpisodePackage(body: {
   return data.data;
 }
 
+export async function saveEpisodePackageRaw(body: {
+  projectId: number;
+  scriptId: number;
+  package: EpisodePackage;
+}) {
+  const { data } = await axios.post<{ data: EpisodePackage }>("/ruleEngine/saveEpisodePackage", body);
+  return data.data;
+}
+
 export async function getRuleReport(projectId: number, scriptId: number, script?: string) {
   const { data } = await axios.post<{ data: { report: ValidationReport; coverage: unknown; stageStatus: unknown } }>("/ruleEngine/getReport", {
     projectId,
