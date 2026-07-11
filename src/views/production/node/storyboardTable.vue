@@ -10,6 +10,16 @@
       <t-empty v-if="!storyboardTable" style="margin-top: 16px"></t-empty>
       <AsyncMdPreview v-else v-model="storyboardTable" :theme="themeSetting.mode" />
     </div>
+    <pipelineGateBar :report="validationReport" />
+    <rulePanel
+      visible
+      :project-id="projectId"
+      :script-id="episodesId"
+      :script="flowData.script"
+      :script-plan="flowData.scriptPlan"
+      :storyboard-table="storyboardTable"
+      :storyboard="flowData.storyboard"
+      @report="onValidationReport" />
   </t-card>
 
   <t-dialog
@@ -37,14 +47,27 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, computed } from "vue";
 import { Handle, Position } from "@vue-flow/core";
 import AsyncMdEditor from "@/components/async/AsyncMdEditor.vue";
 import AsyncMdPreview from "@/components/async/AsyncMdPreview.vue";
 import type { ToolbarNames } from "md-editor-v3";
 import settingStore from "@/stores/setting";
 import productionAgentStore from "@/stores/productionAgent";
+import projectStore from "@/stores/project";
+import rulePanel from "../components/rulePanel/index.vue";
+import pipelineGateBar from "../components/pipelineGateBar/index.vue";
+import type { ValidationReport } from "@/types/ruleEngine";
+
 const { themeSetting } = storeToRefs(settingStore());
+const { episodesId, flowData } = storeToRefs(productionAgentStore());
+const { project } = storeToRefs(projectStore());
+const projectId = computed(() => Number(project.value?.id ?? 0));
+const validationReport = ref<ValidationReport | null>(null);
+
+function onValidationReport(r: ValidationReport) {
+  validationReport.value = r;
+}
 
 const props = defineProps<{
   id: string;

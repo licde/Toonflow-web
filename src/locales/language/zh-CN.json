@@ -1228,6 +1228,13 @@
           "title": "分镜表",
           "editDialog": "编辑分镜表"
         },
+        "rulePanel": {
+          "title": "规则校验",
+          "refresh": "刷新",
+          "autofix": "修复",
+          "empty": "无校验问题",
+          "preflightBlock": "触达前预检未通过，请先修复 BLOCK 项"
+        },
         "assets": {
           "title": "衍生资产",
           "generateFailed": "生成失败",

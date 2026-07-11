@@ -9,6 +9,8 @@
     "build:electron": "node scripts/build-full.mjs electron --release",
     "build:fast": "node scripts/vite-build.mjs web --ultra",
     "build:fast:lite": "node scripts/vite-build.mjs web --lite",
+    "build:integrate": "yarn build:fast:lite && node scripts/copy-to-app.mjs",
+    "build:integrate:release": "yarn build:release && node scripts/copy-to-app.mjs",
     "build:fast:ultra": "node scripts/vite-build.mjs web --ultra",
     "build:release": "node scripts/vite-build.mjs web --release",
     "build:release:fast": "node scripts/vite-build.mjs web --release-fast",

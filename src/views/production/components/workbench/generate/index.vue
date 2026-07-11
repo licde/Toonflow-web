@@ -6,6 +6,7 @@
       </div>
     </div>
     <div class="modelSelect">
+      <t-alert v-if="agnesWarning" theme="warning" :message="agnesWarning" close />
       <modeMenu v-model="modelParmas" :modeOptions="modeOptions" :trackId="currentTrack?.id" :modeList="modeList" @modeChange="modeChange" />
     </div>
     <div class="generate ac">
@@ -56,8 +57,11 @@ import axios from "@/utils/axios";
 import projectStore from "@/stores/project";
 import promptEditor from "@/components/promptEditor.vue";
 import imageListCacheStore from "@/stores/imageListCache";
+import productionAgentStore from "@/stores/productionAgent";
+import { preflightTouch } from "@/utils/ruleEngine";
 
 const { project } = storeToRefs(projectStore());
+const { flowData } = storeToRefs(productionAgentStore());
 const episodesId = inject<Ref<number>>("episodesId")!;
 const activeTrackIndex = ref(0);
 const cacheStore = imageListCacheStore();
@@ -84,6 +88,36 @@ const modelParmas = ref<ModelSetting>({
 });
 
 const storyboardList = ref<StoryboardItem[]>([]); // 分镜列表
+
+const agnesWarning = computed(() => {
+  if (modelParmas.value.mode !== "singleImage") return "";
+  const hasFrame = imageList.value.some((i) => i.src && i.sources === "storyboard");
+  if (!hasFrame) return $t("workbench.production.rulePanel.preflightBlock") + " (Agnes: 需要首位帧)";
+  return "";
+});
+
+async function runPreflight(): Promise<boolean> {
+  const pid = project.value?.id;
+  const sid = episodesId.value;
+  if (pid == null || sid == null) return true;
+  try {
+    const result = await preflightTouch({
+      projectId: pid,
+      scriptId: sid,
+      script: flowData.value.script,
+      scriptPlan: flowData.value.scriptPlan,
+      storyboardTable: flowData.value.storyboardTable,
+      storyboard: flowData.value.storyboard,
+    });
+    if (!result.allowed) {
+      window.$message.error($t("workbench.production.rulePanel.preflightBlock"));
+      return false;
+    }
+    return true;
+  } catch {
+    return true;
+  }
+}
 
 /** 排序优先级：assets有图=0，storyboard有图=1，无图=2 */
 function getImageItemPriority(item: UploadItem): number {
@@ -385,6 +419,7 @@ onMounted(() => {
 });
 /** 单个轨道生成视频 */
 async function generateVideo() {
+  if (!(await runPreflight())) return;
   const dlg = DialogPlugin.confirm({
     header: $t("workbench.generate.generateConfirm"),
     body: $t("workbench.generate.generateConfirmBody"),
