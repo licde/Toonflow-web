@@ -1131,6 +1131,13 @@
           "title": "Storyboard Table",
           "editDialog": "Edit Storyboard Table"
         },
+        "rulePanel": {
+          "title": "Rule checks",
+          "refresh": "Refresh",
+          "autofix": "Auto-fix",
+          "empty": "No issues",
+          "preflightBlock": "Preflight blocked — fix BLOCK items first"
+        },
         "assets": {
           "title": "Derived Assets",
           "generateFailed": "Generation failed",

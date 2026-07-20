@@ -98,6 +98,16 @@
       </div>
       <div class="ac" style="gap: 10px">
         <t-button block @click="previewAll" :disabled="!storyboard.length">{{ $t("workbench.production.node.storyboard.gridPreview") }}</t-button>
+        <t-button
+          block
+          theme="default"
+          variant="outline"
+          @click="batchComposePrompts"
+          :disabled="!storyboard.length || !selectedIds.length"
+          :loading="composeLoading"
+        >
+          批量补全提示词（测试）
+        </t-button>
         <t-button block @click="batchGenerateImage" :disabled="!storyboard.length || !selectedIds.length" :loading="generateLoading">
           {{ $t("workbench.production.node.storyboard.generateImage") }}
         </t-button>
@@ -124,9 +134,10 @@ import editImage from "../components/editImage/index.vue";
 import { LoadingPlugin } from "tdesign-vue-next";
 import { Handle, Position, type Edge } from "@vue-flow/core";
 import axios from "@/utils/axios";
-import type { AssetItem, Storyboard } from "../utils/flowBuilder";
+import type { AssetItem, DeriveAsset, Storyboard } from "../utils/flowBuilder";
 import projectStore from "@/stores/project";
 import productionAgentStore from "@/stores/productionAgent";
+import { parsePromptRefs } from "@/utils/promptRefs";
 const { project } = storeToRefs(projectStore());
 const { episodesId } = storeToRefs(productionAgentStore());
 
@@ -258,19 +269,107 @@ const styleMaxSize = computed(() => {
   else 1;
 });
 const generateLoading = ref(false);
+const composeLoading = ref(false);
+async function batchComposePrompts(opts?: { silent?: boolean }) {
+  if (!selectedIds.value.length) return window.$message.warning("请先选择分镜面板");
+  composeLoading.value = true;
+  try {
+    const { data } = await axios.post("/production/storyboard/batchComposeStillPrompt", {
+      projectId: project.value?.id,
+      scriptId: episodesId.value,
+      storyboardIds: selectedIds.value,
+      mode: "full",
+    });
+    const body = data?.data ?? data;
+    const results = body?.results ?? [];
+    for (const r of results) {
+      if (!r?.ok || !r.prompt) continue;
+      const row = storyboard.value.find((s) => s.id === r.storyboardId);
+      if (row) row.prompt = r.prompt;
+    }
+    if (!opts?.silent) {
+      window.$message.success(body?.userMessage || `已补全 ${results.filter((r: { ok: boolean }) => r.ok).length} 条提示词`);
+    }
+  } catch (e: any) {
+    window.$message.error(e?.response?.data?.data?.userMessage || e?.message || "批量补全失败");
+    throw e;
+  } finally {
+    composeLoading.value = false;
+  }
+}
 async function batchGenerateImage() {
   if (!selectedIds.value.length) return window.$message.warning("请先选择分镜面板");
   generateLoading.value = true;
   try {
+    // BE batchGenerateImage 内已静默 compose + hq；勿再前置 batchCompose（曾误挡缺定妆）
     await productionAgentStore().batchGenerateStoryboard(selectedIds.value, true);
     window.$message.success($t("workbench.production.node.storyboard.batchGenerateSuccess"));
     selectedIds.value = [];
-  } catch (e) {
-    window.$message.error($t("workbench.production.node.storyboard.batchGenerateFailed"));
+  } catch (e: any) {
+    window.$message.error(e?.response?.data?.data?.userMessage || $t("workbench.production.node.storyboard.batchGenerateFailed"));
   } finally {
     generateLoading.value = false;
   }
 }
+function resolveAssetSrc(id: number): string | undefined {
+  const asset = props.assetsData.find((a) => a.id === id);
+  if (asset?.src) return asset.src;
+  for (const a of props.assetsData) {
+    const derive = a.derive?.find((d) => d.id === id);
+    if (derive?.src) return derive.src;
+  }
+  return undefined;
+}
+
+function assetMatchesCode(asset: AssetItem, code: string): boolean {
+  const codeTag = `charCode:${code}`;
+  const suffix = code.replace(/^CHAR-/, "");
+  return (
+    asset.remark === codeTag ||
+    Boolean(asset.remark?.includes(codeTag)) ||
+    asset.name === code ||
+    Boolean(asset.name?.includes(suffix)) ||
+    Boolean(asset.prompt?.includes(code)) ||
+    Boolean(asset.desc?.includes(code))
+  );
+}
+
+function findAssetById(id: number): AssetItem | DeriveAsset | undefined {
+  const asset = props.assetsData.find((a) => a.id === id);
+  if (asset) return asset;
+  for (const a of props.assetsData) {
+    const derive = a.derive?.find((d) => d.id === id);
+    if (derive) return derive;
+  }
+  return undefined;
+}
+
+function isCodeLinkedToPanel(code: string, linkedIds: number[]): boolean {
+  for (const id of linkedIds) {
+    const hit = findAssetById(id);
+    if (hit && "derive" in hit && assetMatchesCode(hit, code)) return true;
+    if (hit && !("derive" in hit)) {
+      const parent = props.assetsData.find((a) => a.derive?.some((d) => d.id === id));
+      if (parent && assetMatchesCode(parent, code)) return true;
+    }
+  }
+  return false;
+}
+
+function resolveAssetByCode(code: string): AssetItem | undefined {
+  const codeTag = `charCode:${code}`;
+  const suffix = code.replace(/^CHAR-/, "");
+  return props.assetsData.find(
+    (a) =>
+      a.remark === codeTag ||
+      a.remark?.includes(codeTag) ||
+      a.name === code ||
+      a.name?.includes(suffix) ||
+      a.prompt?.includes(code) ||
+      a.desc?.includes(code),
+  );
+}
+
 function editStoryboaryImage(item: Storyboard, images: string[], insertAfterIndex: number | null = null) {
   currentRowStoryboardInfo.value = {
     id: insertAfterIndex == null ? item?.id! : null,
@@ -280,38 +379,40 @@ function editStoryboaryImage(item: Storyboard, images: string[], insertAfterInde
     flowId: item?.flowId ?? null,
     resultImages: [],
     referanceImages: [],
+    storyboardId: item?.id,
   };
 
   if (currentRowStoryboardInfo.value.id) {
     let imagesPush: string[] = [];
+    const warnMsgs: string[] = [];
 
     if (item.associateAssetsIds && item.associateAssetsIds.length > 0) {
-      const assetsImages: string[] = [];
       for (const id of item.associateAssetsIds) {
-        // 先查顶层 asset
-        const asset = props.assetsData.find((a) => a.id === id);
-        if (asset) {
-          if (asset.src) assetsImages.push(asset.src);
-          continue;
-        }
-        // 再查 derive
-        for (const a of props.assetsData) {
-          const derive = a.derive?.find((d) => d.id === id);
-          if (derive) {
-            if (derive.src) assetsImages.push(derive.src);
-            break;
-          }
+        const src = resolveAssetSrc(id);
+        if (src) imagesPush.push(src);
+        else {
+          const hit = findAssetById(id);
+          warnMsgs.push(`请先生成角色参考图：${hit?.name ?? id}`);
         }
       }
-      imagesPush = imagesPush.concat(assetsImages);
     }
-    // if (item?.referenceIds && item.referenceIds.length > 0) {
-    //   const referenImages = storyboard.value
-    //     .filter((s) => item.referenceIds!.includes(s.id))
-    //     .map((s) => s.src)
-    //     .filter(Boolean) as string[];
-    //   imagesPush = imagesPush.concat(referenImages);
-    // }
+
+    const refs = parsePromptRefs(item.prompt ?? "");
+    const linkedIds = item.associateAssetsIds ?? [];
+    for (const code of [...refs.crefs, ...refs.srefs]) {
+      if (isCodeLinkedToPanel(code, linkedIds)) continue;
+      const asset = resolveAssetByCode(code);
+      if (!asset) {
+        warnMsgs.push(`未找到 cref ${code}`);
+        continue;
+      }
+      if (asset.src && !imagesPush.includes(asset.src)) imagesPush.push(asset.src);
+      else if (!asset.src) warnMsgs.push(`请先生成角色参考图：${asset.name ?? code}`);
+    }
+
+    for (const w of item.referenceWarnings ?? []) warnMsgs.push(w.message);
+    if (warnMsgs.length) window.$message.warning(warnMsgs.slice(0, 3).join("；"));
+
     currentRow.value.referanceImages = imagesPush;
     currentRow.value.resultImages = [{ src: images.length ? images[0] : "", prompt: item.prompt ?? "" }];
   } else {
@@ -358,6 +459,7 @@ async function save({ imageUrl, flowId }: { imageUrl: string; flowId: number }) 
     id: id,
     url: imageUrl,
     flowId,
+    qualityMode: "hq_update",
   });
 }
 
@@ -399,6 +501,8 @@ function editInfo(item: Storyboard) {
   const formData = reactive({
     prompt: item.prompt ?? "",
     videoDesc: item?.videoDesc ?? "",
+    audioPrompt: item?.audioPrompt ?? "",
+    fxPrompt: item?.fxPrompt ?? "",
   });
 
   const bodyVNode = () =>
@@ -419,6 +523,24 @@ function editInfo(item: Storyboard) {
           placeholder: $t("workbench.production.node.storyboard.videoDescPlaceholder"),
           autosize: { minRows: 3, maxRows: 6 },
           "onUpdate:value": (v: string) => (formData.videoDesc = v),
+        }),
+      ]),
+      h("div", { class: "editInfoField" }, [
+        h("label", { class: "editInfoLabel" }, "audioPrompt"),
+        h(resolveComponent("t-textarea"), {
+          value: formData.audioPrompt,
+          placeholder: "AUD",
+          autosize: { minRows: 2, maxRows: 4 },
+          "onUpdate:value": (v: string) => (formData.audioPrompt = v),
+        }),
+      ]),
+      h("div", { class: "editInfoField" }, [
+        h("label", { class: "editInfoLabel" }, "fxPrompt"),
+        h(resolveComponent("t-textarea"), {
+          value: formData.fxPrompt,
+          placeholder: "FX",
+          autosize: { minRows: 2, maxRows: 4 },
+          "onUpdate:value": (v: string) => (formData.fxPrompt = v),
         }),
       ]),
     ]);
@@ -442,6 +564,9 @@ function editInfo(item: Storyboard) {
         });
         item.prompt = formData.prompt;
         item.videoDesc = formData.videoDesc;
+        item.audioPrompt = formData.audioPrompt;
+        item.fxPrompt = formData.fxPrompt;
+        await productionAgentStore().setFlowData();
         window.$message.success($t("common.editSuccess"));
       } catch (e) {
         window.$message.error((e as any)?.message || $t("common.editFailed"));

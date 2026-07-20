@@ -239,6 +239,7 @@ function makeProductionAgentStore(projectId: string) {
           storyboardIds: allIds,
           concurrentCount: settingStore().otherSetting.assetsBatchGenereateSize,
           compulsory,
+          qualityMode: "hq_update",
         });
         if (data) {
           if (flowData.value.storyboard.length === 0) {
@@ -256,8 +257,19 @@ function makeProductionAgentStore(projectId: string) {
         }
         return data;
       } catch (e) {
-        window.$message.error((e as any)?.message);
+        window.$message.error((e as any)?.response?.data?.data?.userMessage || (e as any)?.message);
+        throw e;
       }
+    }
+
+    async function batchComposeStillPrompts(allIds: number[], mode: "full" | "refine" | "fidelity" = "full") {
+      const { data } = await axios.post("/production/storyboard/batchComposeStillPrompt", {
+        scriptId: episodesId.value,
+        projectId: projectId,
+        storyboardIds: allIds,
+        mode,
+      });
+      return data?.data ?? data;
     }
     async function batchGenerateAssets(allIds: number[]) {
       flowData.value.assets.forEach((asset) => {
@@ -508,6 +520,7 @@ function makeProductionAgentStore(projectId: string) {
       getHistory,
       loadingHistory,
       batchGenerateStoryboard,
+      batchComposeStillPrompts,
       reconnect,
       thinkLevel,
       updateThinkConfig,

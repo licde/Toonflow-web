@@ -33,6 +33,7 @@ export interface AssetItem {
   name: string;
   desc: string;
   prompt: string;
+  remark?: string;
   src: string;
   state: "未生成" | "生成中" | "已完成" | "生成失败";
   type: "role" | "tool" | "scene" | "clip";
@@ -47,6 +48,9 @@ export interface Storyboard {
   prompt: string;
   trackId?: number;
   associateAssetsIds?: number[];
+  referenceWarnings?: { code: string; assetId?: number; message: string }[];
+  audioPrompt?: string;
+  fxPrompt?: string;
   src: string | null;
   state: "未生成" | "生成中" | "已完成" | "生成失败";
   flowId?: number;

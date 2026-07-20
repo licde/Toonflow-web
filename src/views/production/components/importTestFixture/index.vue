@@ -6,7 +6,11 @@
     :confirm-btn="$t('workbench.production.importFixture.confirm')"
     :cancel-btn="$t('workbench.production.cancel')"
     :confirm-loading="loading"
+    :close-on-overlay-click="true"
+    :close-on-esc-keydown="true"
+    destroy-on-close
     @confirm="onConfirm"
+    @cancel="onCancel"
     @close="onClose">
     <div class="importFixture">
       <p class="hint">{{ $t("workbench.production.importFixture.hint") }}</p>
@@ -77,6 +81,11 @@ function onFileChange(files: UploadFile[]) {
 }
 
 function onClose() {
+  jsonText.value = "";
+}
+
+function onCancel() {
+  visible.value = false;
   jsonText.value = "";
 }
 

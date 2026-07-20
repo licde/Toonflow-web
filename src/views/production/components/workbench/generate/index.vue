@@ -17,6 +17,24 @@
               {{ $t("workbench.generate.generateText") }}
             </t-button>
           </template>
+          <IdentitySlotChips :slots="identitySlots" />
+          <ShotSpecDrawer
+            :project-id="project?.id"
+            :script-id="episodesId"
+            :storyboard-id="primaryStoryboardId"
+            :prompt="currentTrack?.prompt"
+            :mode="modelParmas.mode"
+            :duration="modelParmas.duration"
+            :audio="modelParmas.audio"
+            :resolution="modelParmas.resolution"
+            @identity="(slots) => (identitySlots = slots)"
+          />
+          <div v-if="lastRePushPlan.length" class="repushBar">
+            <div v-for="(p, i) in lastRePushPlan" :key="i" class="repushItem">
+              <span>{{ p.trigger }} → {{ p.reverseTarget }}</span>
+              <t-button size="small" variant="outline" @click="onRePushJump(p)">回推设计</t-button>
+            </div>
+          </div>
           <div class="promptData fc">
             <div class="promptInput" @focusout="handlePromptBlur">
               <promptEditor v-model="currentTrack.prompt" :references="references" :placeholder="$t('workbench.generate.promptPlaceholder')" />
@@ -58,14 +76,18 @@ import projectStore from "@/stores/project";
 import promptEditor from "@/components/promptEditor.vue";
 import imageListCacheStore from "@/stores/imageListCache";
 import productionAgentStore from "@/stores/productionAgent";
-import { preflightTouch } from "@/utils/ruleEngine";
+import { preflightProduction, preflightTouch } from "@/utils/ruleEngine";
+import IdentitySlotChips from "./components/IdentitySlotChips.vue";
+import ShotSpecDrawer from "./components/ShotSpecDrawer.vue";
+import { useAdaptationNav } from "@/composables/useAdaptationNav";
 
+const { goDesignStage } = useAdaptationNav();
 const { project } = storeToRefs(projectStore());
 const { flowData } = storeToRefs(productionAgentStore());
 const episodesId = inject<Ref<number>>("episodesId")!;
 const activeTrackIndex = ref(0);
 const cacheStore = imageListCacheStore();
-const { getCache, setCache, removeCache, initCacheFromTrackList, warmUpUrls } = cacheStore;
+const { getCache, setCache, removeCache, initCacheFromTrackList, warmUpUrls, resolveUrls, resolveUrlSync } = cacheStore;
 const { urlMap } = storeToRefs(cacheStore);
 
 const modeOptions = ref<VideoModel>({
@@ -88,6 +110,15 @@ const modelParmas = ref<ModelSetting>({
 });
 
 const storyboardList = ref<StoryboardItem[]>([]); // 分镜列表
+/** trackId → mode → prompt 本地矩阵；切模式零接口；键 = trackId::slotFingerprint */
+const promptByMode = ref<Record<string, Record<string, string>>>({});
+const identitySlots = ref<{ kind: string; code: string }[]>([]);
+const lastRePushPlan = ref<{ trigger: string; reverseTarget: string; forwardRerun?: string[] }[]>([]);
+
+const primaryStoryboardId = computed(() => {
+  const sb = imageList.value.find((i) => i.sources === "storyboard" && typeof i.id === "number");
+  return sb?.id ?? null;
+});
 
 const agnesWarning = computed(() => {
   if (modelParmas.value.mode !== "singleImage") return "";
@@ -101,21 +132,76 @@ async function runPreflight(): Promise<boolean> {
   const sid = episodesId.value;
   if (pid == null || sid == null) return true;
   try {
-    const result = await preflightTouch({
-      projectId: pid,
-      scriptId: sid,
-      script: flowData.value.script,
-      scriptPlan: flowData.value.scriptPlan,
-      storyboardTable: flowData.value.storyboardTable,
-      storyboard: flowData.value.storyboard,
-    });
-    if (!result.allowed) {
-      window.$message.error($t("workbench.production.rulePanel.preflightBlock"));
+    const selectedSbId =
+      primaryStoryboardId.value ??
+      (currentTrack.value?.medias?.find((m) => m.sources === "storyboard" && typeof m.id === "number")?.id as
+        | number
+        | undefined) ??
+      null;
+    const isSingle = modelParmas.value.mode === "singleImage";
+    // singleImage: only gate the active track storyboard (never full episode scan)
+    const storyboardIds = isSingle ? (selectedSbId != null ? [selectedSbId] : []) : undefined;
+    const [touch, prod] = await Promise.all([
+      preflightTouch({
+        projectId: pid,
+        scriptId: sid,
+        script: flowData.value.script,
+        scriptPlan: flowData.value.scriptPlan,
+        storyboardTable: flowData.value.storyboardTable,
+        storyboard: flowData.value.storyboard,
+        mode: modelParmas.value.mode,
+        storyboardIds,
+      }),
+      preflightProduction({
+        projectId: pid,
+        scriptId: sid,
+        tier: "T3",
+        modality: "VID",
+        storyboardIds: isSingle ? storyboardIds : undefined,
+      }),
+    ]);
+    if (prod?.rePushPlan?.length) {
+      lastRePushPlan.value = prod.rePushPlan;
+    }
+    if (!touch.allowed || prod?.blocked || prod?.blockGenerate) {
+      const detectionRows = [
+        ...(prod?.detectionResults ?? []),
+        ...(prod?.failedChecks ?? []),
+        ...(prod?.closureReport as { detectionResults?: { severity?: string; passed?: boolean; message?: string; id?: string }[] } | undefined)
+          ?.detectionResults ?? [],
+      ];
+      const firstBlock =
+        detectionRows.find((c) => c && c.passed === false && (c.severity === "BLOCK" || !c.severity))?.message ||
+        touch.report?.issues?.find((i: { severity?: string }) => i.severity === "BLOCK")?.message ||
+        "";
+      const blockId =
+        detectionRows.find((c) => c && c.passed === false && (c.severity === "BLOCK" || !c.severity))?.id || "";
+      const gs = prod?.gapSummary;
+      const gapHint = gs?.blocks ? ` BLOCK×${gs.blocks}` : "";
+      const planMsg = prod?.rePushPlan?.[0]
+        ? ` → ${prod.rePushPlan[0].trigger}→${prod.rePushPlan[0].reverseTarget}`
+        : "";
+      const detail = firstBlock
+        ? `: ${blockId ? `${blockId} ` : ""}${firstBlock}`
+        : gapHint
+          ? `:${gapHint}`
+          : "";
+      const prefix = $t("workbench.production.rulePanel.preflightBlock");
+      const label =
+        !prefix || prefix === "workbench.production.rulePanel.preflightBlock"
+          ? "触达前预检未通过，请先修复 BLOCK 项"
+          : prefix;
+      window.$message.error(label + detail + planMsg);
       return false;
     }
     return true;
-  } catch {
-    return true;
+  } catch (e: unknown) {
+    const msg =
+      (e as { response?: { data?: { message?: string } }; message?: string })?.response?.data?.message ||
+      (e as Error)?.message ||
+      "preflight error";
+    window.$message.error($t("workbench.production.rulePanel.preflightBlock") + `: ${msg}`);
+    return false;
   }
 }
 
@@ -159,24 +245,34 @@ const imageList = computed({
   },
 });
 
-function modeChange(newVal: string) {
+/** 分镜槽位指纹：参考图变更时切缓存 */
+function slotFingerprint(medias?: UploadItem[]): string {
+  const list = medias ?? imageList.value;
+  if (!list?.length) return "empty";
+  return list
+    .map((i) => `${i.sources ?? ""}:${i.id ?? ""}:${(i as { role?: string }).role ?? ""}`)
+    .join("|");
+}
+
+function promptMatrixKey(trackId: number | string, medias?: UploadItem[]): string {
+  return `${trackId}::${slotFingerprint(medias)}`;
+}
+
+async function modeChange(newVal: string) {
   if (newVal == modelParmas.value.mode) return;
-  if ((imageList.value.length || currentTrack.value?.prompt) && modelParmas.value.mode) {
-    const dialog = DialogPlugin.confirm({
-      header: $t("workbench.generate.modeChange"),
-      body: $t("workbench.generate.modeChangeConfirm"),
-      confirmBtn: $t("settings.generate.modelChnageSure"),
-      cancelBtn: $t("settings.memory.msg.cancel"),
-      onConfirm: async () => {
-        imageList.value = [];
-        currentTrack.value.prompt = "";
-        dialog.destroy();
-        modelParmas.value.mode = newVal;
-      },
-    });
-  } else if (newVal) {
-    modelParmas.value.mode = newVal;
+  // Local matrix switch — zero API / no confirm dialog
+  const track = currentTrack.value;
+  if (track?.id != null) {
+    const key = promptMatrixKey(track.id, track.medias as UploadItem[] | undefined);
+    if (!promptByMode.value[key]) promptByMode.value[key] = {};
+    // Persist current mode prompt into matrix before switch
+    if (modelParmas.value.mode && track.prompt) {
+      promptByMode.value[key][modelParmas.value.mode] = track.prompt;
+    }
+    const cached = promptByMode.value[key][newVal];
+    if (cached) track.prompt = cached;
   }
+  modelParmas.value.mode = newVal;
 }
 const modeList = computed(() => {
   const modeLabelMap: Record<string, string> = {
@@ -241,7 +337,13 @@ watch(
     }
     axios.post("/modelSelect/getModelDetail", { modelId: val }).then(({ data }) => {
       modeOptions.value = data;
-      modelParmas.value.audio = data.audio === true || data.audio === "true" || data.audio == "optional";
+      const dialogueShot = imageList.value.some((i) => i.sources === "storyboard" && (i as { audioPrompt?: string }).audioPrompt);
+      const sbHasAudio = storyboardList.value.some((s: any) => {
+        const mid = imageList.value.find((i) => i.sources === "storyboard" && i.id === s.id);
+        return mid && (s.audioPrompt || (s as any).hasDialogue);
+      });
+      const forceAudio = Boolean(dialogueShot || sbHasAudio || flowData.value.storyboard?.some((s) => s.audioPrompt));
+      modelParmas.value.audio = forceAudio || data.audio === true || data.audio === "true" || data.audio == "optional";
       const drMap = data.durationResolutionMap;
       if (Array.isArray(drMap) && drMap.length > 0) {
         if (drMap[0].resolution?.length) modelParmas.value.resolution = drMap[0].resolution[0];
@@ -308,8 +410,17 @@ async function getGenerateData() {
   if (pid != null && sid != null) {
     // 先将没有缓存的轨道写入缓存（保留已有本地编辑）
     initCacheFromTrackList(pid, sid, data.trackList);
-    // 批量向后端请求文件路径对应的完整 URL
+    // 批量向后端请求文件路径对应的完整 URL（含分镜选择器）
     await warmUpUrls(pid, sid);
+    const sbItems = (data.storyboardList ?? []).map((s: StoryboardItem) => ({
+      id: s.id,
+      sources: "storyboard" as const,
+    }));
+    await resolveUrls(sbItems);
+    storyboardList.value = (data.storyboardList ?? []).map((s: StoryboardItem) => ({
+      ...s,
+      src: resolveUrlSync(s.id, "storyboard", s.src),
+    }));
     // 将本地缓存回写到 trackList，确保优先使用缓存数据（src 已解析为完整 URL）
     data.trackList.forEach((track: TrackItem) => {
       if (track.id == null) return;
@@ -331,29 +442,54 @@ function handlePromptBlur() {
   axios.post("/production/workbench/updateVideoPrompt", { id: trackId, prompt: currentTrack.value?.prompt });
 }
 
-/** 单个轨道生成提示词 */
+/** 单个轨道生成提示词 — 一次填满 promptByMode 矩阵 */
 async function genText() {
   const track = currentTrack.value;
   if (track.id == null || track.state === "生成中") return;
-  let info: { id: number; sources: string }[] = [];
+  let info: { id: number; sources: string; role?: string }[] = [];
   const currentTrackId = track.id;
   const rawMedias = (track.medias ?? []) as UploadItem[];
+  const frameMode = ["startEndRequired", "endFrameOptional", "startFrameOptional"];
   if (modelParmas.value.mode == "text") {
     info = rawMedias.map(({ id, sources }) => ({ id: id!, sources }));
   } else {
-    const frameMode = ["startEndRequired", "endFrameOptional", "startFrameOptional"];
     const preSliced = frameMode.includes(modelParmas.value.mode)
       ? rawMedias.slice(0, 2)
       : modelParmas.value.mode === "singleImage"
         ? rawMedias.slice(0, 1)
         : rawMedias;
-    const filtered = preSliced.filter((item) => typeof item.id === "number" && !isNaN(item.id)).map(({ id, sources }) => ({ id: id!, sources }));
+    const filtered = preSliced.filter((item) => typeof item.id === "number" && !isNaN(item.id)).map(({ id, sources }, idx) => ({
+      id: id!,
+      sources,
+      role: frameMode.includes(modelParmas.value.mode) ? (idx === 0 ? "start" : "end") : undefined,
+    }));
     if (frameMode.includes(modelParmas.value.mode)) info = filtered.slice(0, 2);
     else if (modelParmas.value.mode === "singleImage") info = filtered.slice(0, 1);
     else info = filtered;
   }
   track.state = "生成中";
   try {
+    const modes = (modeOptions.value.mode ?? []).map((m: VideoMode) => (Array.isArray(m) ? JSON.stringify(m) : String(m)));
+    const fillModes = modes.length ? modes : [modelParmas.value.mode].filter(Boolean);
+    const { data: matrixData } = await axios.post("/production/workbench/fillModeMatrix", {
+      projectId: project.value?.id,
+      scriptId: episodesId.value,
+      storyboardId: primaryStoryboardId.value ?? undefined,
+      modes: fillModes,
+      seedPrompt: track.prompt ?? "",
+      model: modelParmas.value.model,
+      info,
+    });
+    const matrixPayload = matrixData?.data ?? matrixData;
+    const byMode = matrixPayload?.promptByMode ?? {};
+    const trackKey = promptMatrixKey(currentTrackId, rawMedias);
+    promptByMode.value[trackKey] = {};
+    for (const [mode, entry] of Object.entries(byMode) as [string, { prompt?: string } | string][]) {
+      const p = typeof entry === "string" ? entry : entry?.prompt ?? "";
+      if (p) promptByMode.value[trackKey][mode] = p;
+    }
+
+    // Also generate current mode via generate path for DB persistence
     const { data } = await axios.post("/production/workbench/generateVideoPrompt", {
       projectId: project.value?.id,
       trackId: currentTrackId,
@@ -361,12 +497,105 @@ async function genText() {
       model: modelParmas.value.model,
       mode: modelParmas.value.mode,
     });
-    track.prompt = data;
+    const payload = data?.data ?? data;
+    const promptText =
+      typeof payload === "string"
+        ? payload
+        : typeof payload?.prompt === "string"
+          ? payload.prompt
+          : typeof data === "string"
+            ? data
+            : "";
+    track.prompt = promptText;
+    if (Array.isArray(payload?.identity)) {
+      identitySlots.value = payload.identity;
+    } else {
+      identitySlots.value = parseIdentitySlots(track.prompt);
+    }
+    if (Array.isArray(payload?.autoHealed) && payload.autoHealed.length && payload?.burnAllowed !== false) {
+      window.$message.success(
+        `已自动修复：${payload.autoHealed.join("、")}${payload.duration != null ? `（时长 ${payload.duration}s）` : ""}`,
+      );
+    }
+    if (payload?.redLights?.length) {
+      const blocks = payload.redLights.filter((r: { level: string }) => r.level === "BLOCK");
+      if (blocks.length || payload?.burnAllowed === false) {
+        // Only copy repair list when still blocked after silent heal
+        const crt = typeof payload.chatRepairText === "string" ? payload.chatRepairText : "";
+        const um =
+          payload?.qualityDecision?.userMessage ||
+          payload?.userMessage ||
+          blocks.map((b: { message: string }) => b.message).join("；") ||
+          payload.qualityDecision?.reasons?.join("; ") ||
+          "挡烧";
+        const suggested = payload?.qualityDecision?.suggestedValue ?? payload?.suggestedValue;
+        const cta = payload?.qualityDecision?.ctaLabel || payload?.ctaLabel;
+        if (crt.trim()) {
+          try {
+            await navigator.clipboard?.writeText(crt);
+          } catch {
+            /* ignore */
+          }
+          window.$message.error(
+            `提示词未达烧片标准 — ${um}${suggested != null ? `（建议 ${suggested}）` : ""}${cta ? ` · ${cta}` : ""} — 已复制修复清单`,
+          );
+        } else {
+          window.$message.error(um);
+        }
+      }
+    }
+    if (modelParmas.value.mode) {
+      promptByMode.value[trackKey][modelParmas.value.mode] = promptText;
+    }
+    // Prefer matrix entry for current mode if richer
+    const matrixCur = promptByMode.value[trackKey][modelParmas.value.mode];
+    if (matrixCur && (!promptText || matrixCur.length > promptText.length)) {
+      track.prompt = matrixCur;
+    }
+    if (!payload?.identity) identitySlots.value = parseIdentitySlots(track.prompt);
     track.state = "已完成";
-  } catch (e) {
+  } catch (e: any) {
     track.state = "生成失败";
-    window.$message.error((e as Error)?.message ?? "提示词生成失败");
+    const plan = e?.response?.data?.data?.rePushPlan ?? e?.data?.rePushPlan ?? e?.rePushPlan;
+    if (Array.isArray(plan) && plan.length) {
+      lastRePushPlan.value = plan;
+      window.$message.error(`提示词失败 · ${plan[0].trigger}→${plan[0].reverseTarget}`);
+    } else {
+      window.$message.error((e as Error)?.message ?? "提示词生成失败");
+    }
   }
+}
+
+function parseIdentitySlots(prompt: string): { kind: string; code: string }[] {
+  if (!prompt) return [];
+  const out: { kind: string; code: string }[] = [];
+  const block = prompt.match(/identity\[([^\]]+)\]/i);
+  if (block) {
+    for (const part of block[1].split("|")) {
+      const m = part.trim().match(/^(CHAR|SCENE|PROP)\s*:\s*([A-Z0-9-]+)/i);
+      if (m) out.push({ kind: m[1].toUpperCase(), code: m[2].toUpperCase() });
+    }
+  }
+  for (const m of prompt.matchAll(/--cref\s+([A-Z0-9,\s-]+)/gi)) {
+    for (const c of m[1].split(/[,\s]+/)) {
+      if (/^CHAR-/i.test(c)) out.push({ kind: "CHAR", code: c.toUpperCase() });
+    }
+  }
+  for (const m of prompt.matchAll(/--sref\s+([A-Z0-9,\s-]+)/gi)) {
+    for (const c of m[1].split(/[,\s]+/)) {
+      if (/^(SCENE|PROP)-/i.test(c)) out.push({ kind: c.toUpperCase().startsWith("PROP") ? "PROP" : "SCENE", code: c.toUpperCase() });
+    }
+  }
+  const seen = new Set<string>();
+  return out.filter((s) => {
+    if (seen.has(s.code)) return false;
+    seen.add(s.code);
+    return true;
+  });
+}
+
+function onRePushJump(item: { reverseTarget: string; trigger: string }) {
+  goDesignStage(item.reverseTarget, item.trigger);
 }
 function trackChange(prevIndex?: number) {
   // 切换前：将旧轨道的 imageList 保存到缓存
@@ -460,8 +689,44 @@ async function generateVideo() {
           state: "生成中",
           src: "",
         });
-      } catch (e) {
-        window.$message.error((e as any)?.message ?? "视频发起生成请求失败");
+      } catch (e: any) {
+        const details = e?.response?.data?.data ?? e?.data ?? e;
+        const plan = details?.rePushPlan;
+        const qd = details?.qualityDecision;
+        const um = details?.userMessage || qd?.userMessage || details?.message;
+        const suggested = details?.suggestedValue ?? qd?.suggestedValue;
+        const cta = details?.ctaLabel || qd?.ctaLabel;
+        const crt =
+          typeof details?.chatRepairText === "string"
+            ? details.chatRepairText
+            : typeof details?.exportGate?.chatRepairText === "string"
+              ? details.exportGate.chatRepairText
+              : "";
+        // Prefer actionable CTA over blank soft_patch copy
+        if (um && (suggested != null || cta)) {
+          if (crt.trim()) {
+            try {
+              await navigator.clipboard?.writeText(crt);
+            } catch {
+              /* ignore */
+            }
+          }
+          window.$message.error(
+            `${um}${suggested != null ? `（建议 ${suggested}）` : ""}${cta ? ` · ${cta}` : ""}${crt.trim() ? " — 已复制修复清单" : ""}`,
+          );
+        } else if (crt.trim()) {
+          try {
+            await navigator.clipboard?.writeText(crt);
+            window.$message.error("质量决策挡烧 — 已复制闭环修复清单，请回推 Chat");
+          } catch {
+            window.$message.error(details?.message || e?.message || "质量决策挡烧");
+          }
+        } else if (Array.isArray(plan) && plan.length) {
+          lastRePushPlan.value = plan;
+          window.$message.error(`生成失败 · ${plan[0].trigger}→${plan[0].reverseTarget}`);
+        } else {
+          window.$message.error(details?.message || (e as any)?.message || "视频发起生成请求失败");
+        }
       } finally {
       }
     },
@@ -470,6 +735,10 @@ async function generateVideo() {
 }
 let pollTimer: NodeJS.Timeout | null = null;
 let promptPollTimer: NodeJS.Timeout | null = null;
+let videoPollFails = 0;
+let promptPollFails = 0;
+const POLL_FAIL_MAX = 5;
+
 function startPoll() {
   if (pollTimer !== null) return;
   pollTimer = setInterval(() => getVideoList(), 3000);
@@ -494,23 +763,32 @@ const hasGeneratePromptIds = computed(() => {
 });
 /** 查询所有视频列表，并检测生成完成/失败状态 */
 async function getVideoList() {
-  const { data } = await axios.post("/production/workbench/checkVideoStateList", {
-    projectId: project.value?.id,
-    scriptId: episodesId.value ?? 0,
-    videoIds: hasGenerateVideoIds.value,
-  });
-  if (data && data.length) {
-    data.forEach((item: { id: number; state: "生成中" | "未生成" | "已完成" | "生成失败"; src?: string; errorReason?: string }) => {
-      for (const track of trackList.value) {
-        const findData = track.videoList.find((i) => i.id == item.id);
-        if (findData) {
-          findData.state = item.state;
-          findData.src = item?.src ?? "";
-          findData.errorReason = item?.errorReason ?? "";
-          break;
-        }
-      }
+  try {
+    const { data } = await axios.post("/production/workbench/checkVideoStateList", {
+      projectId: project.value?.id,
+      scriptId: episodesId.value ?? 0,
+      videoIds: hasGenerateVideoIds.value,
     });
+    videoPollFails = 0;
+    if (data && data.length) {
+      data.forEach((item: { id: number; state: "生成中" | "未生成" | "已完成" | "生成失败"; src?: string; errorReason?: string }) => {
+        for (const track of trackList.value) {
+          const findData = track.videoList.find((i) => i.id == item.id);
+          if (findData) {
+            findData.state = item.state;
+            findData.src = item?.src ?? "";
+            findData.errorReason = item?.errorReason ?? "";
+            break;
+          }
+        }
+      });
+    }
+  } catch {
+    videoPollFails++;
+    if (videoPollFails >= POLL_FAIL_MAX) {
+      stopPoll();
+      window.$message?.warning?.($t("workbench.generate.pollingFailed"));
+    }
   }
 }
 function startPromptPoll() {
@@ -524,25 +802,34 @@ function stopPromptPoll() {
     promptPollTimer = null;
   }
 }
-/** 查询所有视频列表，并检测生成完成/失败状态 */
+/** 查询提示词生成状态 */
 async function getTrackPromptList() {
-  const { data } = await axios.post("/production/workbench/checkVideoPrompt", {
-    projectId: project.value?.id,
-    scriptId: episodesId.value ?? 0,
-    trackIds: hasGeneratePromptIds.value,
-  });
-  if (data && data.length) {
-    data.forEach((item: { id: number; state: "生成中" | "未生成" | "已完成" | "生成失败"; prompt?: string; reason?: string }) => {
-      const findData = trackList.value.find((t) => t.id == item.id);
-      if (findData) {
-        findData.state = item.state;
-        findData.prompt = item?.prompt ?? "";
-        findData.reason = item?.reason ?? "";
-        if (item.state === "生成失败") {
-          window.$message.error(`提示词生成失败，${item.reason ?? "未知原因"}`);
-        }
-      }
+  try {
+    const { data } = await axios.post("/production/workbench/checkVideoPrompt", {
+      projectId: project.value?.id,
+      scriptId: episodesId.value ?? 0,
+      trackIds: hasGeneratePromptIds.value,
     });
+    promptPollFails = 0;
+    if (data && data.length) {
+      data.forEach((item: { id: number; state: "生成中" | "未生成" | "已完成" | "生成失败"; prompt?: string; reason?: string }) => {
+        const findData = trackList.value.find((t) => t.id == item.id);
+        if (findData) {
+          findData.state = item.state;
+          findData.prompt = item?.prompt ?? "";
+          findData.reason = item?.reason ?? "";
+          if (item.state === "生成失败") {
+            window.$message.error(`提示词生成失败，${item.reason ?? "未知原因"}`);
+          }
+        }
+      });
+    }
+  } catch {
+    promptPollFails++;
+    if (promptPollFails >= POLL_FAIL_MAX) {
+      stopPromptPoll();
+      window.$message?.warning?.($t("workbench.generate.pollingFailed"));
+    }
   }
 }
 watch(

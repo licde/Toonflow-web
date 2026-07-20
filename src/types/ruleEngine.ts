@@ -40,3 +40,38 @@ export interface EpisodePackage {
   rulePackVersion: string;
   updatedAt: number;
 }
+
+export interface DryRunImportSummary {
+  willCreateScript: boolean;
+  willOverwriteLayers: string[];
+  storyboardCount: number;
+  mergeStrategy: string;
+  warnings: string[];
+  tier?: "T1" | "T2" | "T3";
+  shapeSalvageLog?: { ruleId: string; path: string; action: string }[];
+  preImport?: import("./closure").InspectBundleResult;
+  exportGate?: {
+    exportAllowed: boolean;
+    closureSnapshot?: {
+      tier: "T1" | "T2" | "T3";
+      blocked: boolean;
+      blockIds: string[];
+      warnIds: string[];
+      checkedAt: string;
+      rulePackVersion: string;
+    };
+    coverage?: {
+      matrixTotal: number;
+      blocks: number;
+      warns: number;
+      softPatchEligible: number;
+    };
+    chatRepairText?: string;
+    blocks?: { id: string; message?: string; field?: string }[];
+    warns?: { id: string; message?: string }[];
+    repairHints?: { id: string; chatTemplate?: string; ruleId?: string }[];
+    missingFieldSummary?: string;
+    shapeSalvageLog?: { ruleId: string; path: string; action: string }[];
+  };
+  chatRepairText?: string;
+}

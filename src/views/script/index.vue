@@ -1,5 +1,6 @@
 <template>
   <div class="script">
+    <adaptationFlowBar variant="script" />
     <div class="actionBar w">
       <div class="actionBar-left f ac">
         <t-input :placeholder="$t('workbench.script.searchPlaceholder')" v-model="searchQuery" class="searchInput" clearable style="width: 300px" />
@@ -63,6 +64,11 @@
             <div class="del">
               <i-delete theme="outline" size="18" @click.stop="handleDeleteScript(item.id)" style="cursor: pointer" />
             </div>
+            <div class="cardActions f ac" @click.stop>
+              <t-button size="small" theme="primary" variant="outline" @click="handleEnterProduction(item.id)">
+                {{ $t("workbench.script.enterProduction") }}
+              </t-button>
+            </div>
           </t-card>
         </div>
       </div>
@@ -78,6 +84,8 @@ import axios from "@/utils/axios";
 import editScript from "./components/editScript.vue";
 import addScript from "./components/addScript.vue";
 import batchAddScript from "./components/batchAddScript.vue";
+import adaptationFlowBar from "@/components/adaptationFlowBar/index.vue";
+import { useAdaptationNav } from "@/composables/useAdaptationNav";
 import projectStore from "@/stores/project";
 import settingStore from "@/stores/setting";
 import imageListCacheStore from "@/stores/imageListCache";
@@ -86,6 +94,7 @@ const { clearScriptCache } = imageListCacheStore();
 
 const { otherSetting } = storeToRefs(settingStore());
 const { project } = storeToRefs(projectStore());
+const { goProduction } = useAdaptationNav();
 interface ScriptAsset {
   id: number;
   name: string;
@@ -183,6 +192,10 @@ const detailsShow = ref(false);
 function handleScriptClick(item: Script) {
   selectedScript.value = { ...item };
   detailsShow.value = true;
+}
+
+function handleEnterProduction(scriptId: number) {
+  goProduction(scriptId);
 }
 // 删除剧本
 async function handleDeleteScript(scriptId: number) {
@@ -386,6 +399,10 @@ onUnmounted(() => {
       }
       .del:hover {
         opacity: 1;
+      }
+      .cardActions {
+        margin-top: 8px;
+        justify-content: flex-end;
       }
     }
     .emptyState {

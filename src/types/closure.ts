@@ -1,0 +1,121 @@
+/** Matches POST /api/ruleEngine/inspectBundle response */
+
+export type ClosureTier = "T1" | "T2" | "T3";
+
+export interface ClosureCheck {
+  id: string;
+  passed: boolean;
+  message?: string;
+  severity?: "BLOCK" | "WARN" | "INFO" | "OPTIMIZE";
+}
+
+export interface ReverseHint {
+  dimension: string;
+  chainId: string;
+  symptom: string;
+  reverseTarget: string;
+  preserveFields?: string[];
+  ruleId?: string;
+}
+
+export interface RepairHint {
+  id: string;
+  chatTemplate?: string;
+  ruleId?: string;
+  qpId?: string;
+}
+
+export interface RePushPlanItem {
+  id?: string;
+  trigger: string;
+  reverseTarget: string;
+  preserveFields?: string[];
+  presentationFork?: "fork-A" | "fork-B" | null;
+  reason?: string;
+  status?: "pending" | "applied" | "in_progress" | "completed" | "exhausted";
+}
+
+export interface ClosureReport {
+  missing?: string[];
+  optimize?: string[];
+  chains?: string[];
+}
+
+export interface ChatPromptGap {
+  id: string;
+  shotIndex?: number;
+  severity: "BLOCK" | "WARN";
+  message: string;
+  field?: string;
+}
+
+export interface MergeReport {
+  action: "create" | "update" | "match";
+  scriptId: number;
+  storyboardReplaced: boolean;
+  storyboardCount: number;
+  blueprintMerged: boolean;
+  assetsSeeded?: number;
+  importMode?: string;
+  mergeStrategy?: string;
+  mediaPreservedCount?: number;
+  assetDiagnostics?: {
+    seeded?: number;
+    linked?: number;
+    pruned?: number;
+    speakerSeeded?: number;
+    duplicateSuspects?: string[];
+  };
+}
+
+export interface QualityGateIssue {
+  id: string;
+  severity: "BLOCK" | "WARN" | "INFO";
+  message: string;
+  shotIndex?: number;
+}
+
+export interface InspectBundleResult {
+  tier: ClosureTier;
+  blocked: boolean;
+  rulePackVersion: string;
+  closureChecks: {
+    dc: ClosureCheck[];
+    pc: ClosureCheck[];
+    gc: ClosureCheck[];
+    ic: ClosureCheck[];
+    blocked: boolean;
+  };
+  forwardTrace?: { version?: string; traces?: unknown[] };
+  reverseHints?: ReverseHint[];
+  repairHints?: RepairHint[];
+  rePushPlan?: RePushPlanItem[];
+  warnings?: string[];
+  chatPromptGaps?: ChatPromptGap[];
+  closureReport?: ClosureReport;
+  modalityGaps?: unknown[];
+  adaptationGaps?: unknown[];
+  retentionGaps?: unknown[];
+  narrativeDriveGaps?: unknown[];
+  packagingGaps?: unknown[];
+  generationApplyGaps?: unknown[];
+  designSpecGaps?: unknown[];
+  scriptViralGaps?: unknown[];
+  qualityGate?: {
+    blocked: boolean;
+    blocks: QualityGateIssue[];
+    warns: QualityGateIssue[];
+    issues: QualityGateIssue[];
+  };
+  /** One-copy repair brief from exportGate / inspect */
+  chatRepairText?: string;
+}
+
+export type ClosureDimension = "dc" | "pc" | "gc" | "ic";
+
+export const CLOSURE_DIMENSION_LABELS: Record<ClosureDimension, string> = {
+  dc: "设计闭环 DC",
+  pc: "制作闭环 PC",
+  gc: "生成闭环 GC",
+  ic: "智能修复 IC",
+};

@@ -101,6 +101,12 @@ const currentRow = ref<{
 const visible = ref(false);
 const currentAssetsId = ref();
 function generateAssetsImage(row: DeriveAsset, referanceImageUrl: string) {
+  if (!referanceImageUrl) {
+    return window.$message?.error?.("请先生成父资产图，再生成衍生态") ?? window.$message.error("请先生成父资产图，再生成衍生态");
+  }
+  if (!row.prompt?.trim()) {
+    return window.$message.error("衍生提示词为空，请检查导入的态变异描述");
+  }
   currentRow.value = {
     flowId: row?.flowId,
     resultImages: [{ src: row.src, prompt: row.prompt }],

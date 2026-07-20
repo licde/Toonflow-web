@@ -94,7 +94,7 @@
       width="800px"
       placement="center">
       <div class="storyboardGrid">
-        <div class="storyboardItem" v-for="sb in storyboardList" :key="sb.id" @click="pickStoryboard(sb)">
+        <div class="storyboardItem" v-for="sb in displayStoryboardList" :key="sb.id" @click="pickStoryboard(sb)">
           <div class="imageTitleWrap" v-if="sb?.index != null">
             {{ `P${sb?.index + 1}` }}
           </div>
@@ -111,10 +111,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, computed } from "vue";
 import "@/views/production/components/workbench/type/type";
 import assetsCheck, { type AssetType, type ClipMediaType } from "@/utils/assetsCheck";
 import axios from "@/utils/axios";
+import imageListCacheStore from "@/stores/imageListCache";
 
 const props = defineProps<{
   mode: VideoMode;
@@ -123,8 +124,27 @@ const props = defineProps<{
 const imageList = defineModel<UploadItem[]>({
   default: () => [],
 });
+const cacheStore = imageListCacheStore();
+const { urlMap } = storeToRefs(cacheStore);
+const { resolveUrls: resolveUrlsFn, resolveUrlSync: resolveUrlSyncFn } = cacheStore;
+
+const displayStoryboardList = computed(() => {
+  // Depend on urlMap for reactivity after warm-up
+  // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+  urlMap.value;
+  return props.storyboardList.map((sb) => ({
+    ...sb,
+    src: resolveUrlSyncFn(sb.id, "storyboard", sb.src) || sb.src,
+  }));
+});
 //分镜选择弹窗
 const storyboardDialogVisible = ref(false);
+
+async function openStoryboardDialog() {
+  const items = props.storyboardList.filter((s) => s.id != null).map((s) => ({ id: s.id, sources: "storyboard" as const }));
+  if (items.length) await resolveUrlsFn(items);
+  storyboardDialogVisible.value = true;
+}
 
 /** 空占位项，用于首尾帧模式中未设置的槽位 */
 const EMPTY_SLOT: UploadItem = { fileType: "image", id: null, src: "" } as any;
@@ -188,12 +208,16 @@ function getFileTypeByExt(src: string | undefined): "image" | "video" | "audio" 
   if (["mp3", "wav", "ogg", "aac", "flac", "m4a"].includes(ext)) return "audio";
   return "image";
 }
-/** 根据混合模式推导当前允许的 clip 媒体类型 */
+/** 根据混合模式推导当前允许的 clip 媒体类型（mode 可能是 JSON 字符串） */
 const mixedClipMediaTypes = computed<ClipMediaType[]>(() => {
-  const mode = props.mode;
-  if (!Array.isArray(mode)) return [];
+  const parsed = parseMode(props.mode as string);
+  const modeArr = Array.isArray(parsed) ? parsed : Array.isArray(props.mode) ? (props.mode as ReferenceType[]) : [];
+  if (!modeArr.length) return [];
   const map: Record<string, ClipMediaType> = { audioReference: "audio", imageReference: "image", videoReference: "video" };
-  return mode.filter((m) => m in map).map((m) => map[m]);
+  return modeArr
+    .map((m) => String(m).split(":")[0])
+    .filter((m) => m in map)
+    .map((m) => map[m]);
 });
 let currentSlot: "start" | "end" | "" = "";
 function handleMixedAdd(slot: "start" | "end" | "" = "") {
@@ -248,7 +272,7 @@ function handleMixedAdd(slot: "start" | "end" | "" = "") {
     },
     onCancel: () => {
       dlg.destroy();
-      storyboardDialogVisible.value = true;
+      void openStoryboardDialog();
     },
   });
 }
@@ -261,10 +285,11 @@ function clearImage(index: number) {
 function pickStoryboard(sb: StoryboardItem) {
   storyboardDialogVisible.value = false;
   const fileType = "image";
+  const resolved = resolveUrlSyncFn(sb.id, "storyboard", sb.src);
   const newItem = {
     fileType,
     sources: "storyboard",
-    src: sb.src,
+    src: resolved || sb.src,
     id: sb.id,
     prompt: sb.videoDesc ?? undefined,
     index: sb.index,

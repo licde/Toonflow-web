@@ -29,6 +29,7 @@
         </t-button>
       </div>
     </div>
+    <adaptationFlowBar />
     <t-table
       ref="tableRef"
       style="margin-top: 10px; flex: 1; display: flex; flex-direction: column"
@@ -113,6 +114,7 @@ import dayjs from "dayjs";
 import axios from "@/utils/axios";
 import importNovel from "./components/importNovel.vue";
 import editNodel from "./components/editNodel.vue";
+import adaptationFlowBar from "@/components/adaptationFlowBar/index.vue";
 import projectStore from "@/stores/project";
 import settingStore from "@/stores/setting";
 const { otherSetting } = storeToRefs(settingStore());

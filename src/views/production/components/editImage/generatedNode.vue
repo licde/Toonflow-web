@@ -42,10 +42,34 @@
       <div class="text w">
         <PromptEditor v-model="data.prompt" :references="references" :placeholder="$t('workbench.production.editImage.promptPlaceholder')" />
       </div>
+      <div v-if="gateMessage || promptUsedSummary" class="feedbackBox w">
+        <t-alert :theme="stillQuality === 'hq_ok' ? 'success' : 'warning'" :message="gateMessage || '合成提示词已更新'" />
+        <p v-if="promptUsedSummary" class="promptSummary">{{ promptUsedSummary }}</p>
+        <t-button
+          v-if="composePreview?.ok && composePreview.prompt && composePreview.prompt !== data.prompt"
+          size="small"
+          theme="primary"
+          variant="outline"
+          :loading="previewing"
+          @click="applyComposePreview"
+        >
+          应用补全
+        </t-button>
+        <t-button size="small" theme="default" variant="outline" :loading="previewing" @click="() => loadComposePreview({ mode: 'fidelity', autoApply: true })">
+          更贴描述（测试）
+        </t-button>
+        <t-button v-if="lastFeedback?.suggestedPrompt" size="small" theme="primary" variant="outline" :loading="generating" @click="retryWithSuggestion">
+          重试建议提示词
+        </t-button>
+      </div>
+      <div v-else-if="lastFeedback?.suggestedPrompt" class="feedbackBox w">
+        <t-alert theme="warning" :message="lastFeedback.suggestedPrompt" />
+        <t-button size="small" theme="primary" variant="outline" :loading="generating" @click="retryWithSuggestion">重试建议提示词</t-button>
+      </div>
       <div class="operate ac jb">
         <div class="ac">
           <modelSelect v-model="data.model" type="image" size="small" />
-          <t-select v-model="data.ratio" class="paramSelect ml-5" size="small" :placeholder="$t('workbench.production.editImage.ratio')">
+          <t-select v-model="data.ratio" class="paramSelect ml-5" size="small" disabled :placeholder="$t('workbench.production.editImage.ratio')">
             <t-option value="16:9" label="16:9" />
             <t-option value="9:16" label="9:16" />
             <t-option value="1:1" label="1:1" />
@@ -55,11 +79,20 @@
             <t-option value="2K" label="2K" />
             <t-option value="4K" label="4K" />
           </t-select>
+          <t-tag v-if="stillQuality" size="small" class="ml-5" :theme="stillQuality === 'hq_ok' ? 'success' : 'warning'" variant="light">
+            {{ stillQuality }}
+          </t-tag>
         </div>
 
         <div class="f" style="gap: 5px; margin-left: 5px">
+          <t-popup content="测试：再点补全=refine">
+            <t-button theme="default" size="small" variant="outline" :loading="previewing" @click="() => loadComposePreview({ mode: 'refine', autoApply: true, persist: true })">补全(测)</t-button>
+          </t-popup>
+          <t-popup content="测试：更贴描述=fidelity">
+            <t-button theme="default" size="small" variant="outline" :loading="previewing" @click="() => loadComposePreview({ mode: 'fidelity', autoApply: true, persist: true })">贴描述(测)</t-button>
+          </t-popup>
           <t-popup :content="$t('workbench.production.editImage.generateBtn')">
-            <t-button theme="primary" size="small" class="generateBtn" :disabled="generating" :loading="generating" @click="handleGenerate">
+            <t-button theme="primary" size="small" class="generateBtn" :disabled="generating" :loading="generating" @click="() => handleGenerate()">
               <template #icon><i-arrow-up /></template>
             </t-button>
           </t-popup>
@@ -87,13 +120,49 @@ import type { Storyboard } from "../../utils/flowBuilder";
 import openAssetsSelector from "@/utils/assetsCheck";
 import { useFileDialog } from "@vueuse/core";
 import projectStore from "@/stores/project";
+import { resolveGeneratePrompt } from "@/utils/resolveGeneratePrompt";
 const { project } = storeToRefs(projectStore());
 const openStoryboardCheck = inject<() => Promise<Storyboard[]>>("openStoryboardCheck")!;
 const { open, onChange, onCancel } = useFileDialog({ multiple: false, reset: true, accept: ".png,.jpg,.jpeg" });
 
 const selected = ref(true);
 const generating = ref(false);
+const previewing = ref(false);
+const stillQuality = ref<string | null>(null);
+const gateMessage = ref("");
+const composePreview = ref<{
+  ok?: boolean;
+  prompt?: string;
+  userMessage?: string;
+  didSynthesize?: boolean;
+  composeMode?: string;
+  entityAnchors?: string[];
+} | null>(null);
+const promptUsedSummary = ref("");
+const lastComposeMode = ref<"full" | "refine" | "fidelity">("full");
 const episodesId = inject<Ref<number>>("episodesId")!;
+const lastFeedback = ref<{ suggestedPrompt?: string; message?: string } | null>(null);
+const storyboardId = inject<Ref<number | undefined> | number | undefined>("editStoryboardId", undefined);
+
+function isTokenOnlyPrompt(p: string): boolean {
+  const t = String(p ?? "").trim();
+  if (!t) return true;
+  const body = t
+    .replace(/(?:^|\s)--(?:cref|sref)\s+\S+(?:\s+[A-Za-z]+-[A-Za-z0-9]+)*/gi, " ")
+    .replace(/(?:^|\s)--ar\s+\S+/gi, " ")
+    .replace(/\s+/g, "")
+    .trim();
+  return body.length < 8;
+}
+
+function looksDirtyPrompt(p: string): boolean {
+  const t = String(p ?? "");
+  if (isTokenOnlyPrompt(t)) return true;
+  if (/vertical\s*9:16\s*safe\s*area/i.test(t) && !/[\u4e00-\u9fff]{4,}/.test(t)) return true;
+  if ((t.match(/--cref/gi) ?? []).length >= 2) return true;
+  if (/\bMS\b/.test(t)) return true;
+  return false;
+}
 
 const emit = defineEmits(["keep"]);
 const { removeNodes } = useVueFlow("editImage");
@@ -171,27 +240,133 @@ async function getStoryboardImage() {
     props.data.generatedImage = filePath;
   }
 }
+function resolveStoryboardId(): number | undefined {
+  const sid = typeof storyboardId === "object" && storyboardId && "value" in storyboardId ? storyboardId.value : storyboardId;
+  return sid as number | undefined;
+}
+
+async function loadComposePreview(opts?: {
+  autoApply?: boolean;
+  mode?: "full" | "refine" | "fidelity";
+  persist?: boolean;
+}) {
+  previewing.value = true;
+  gateMessage.value = "";
+  const mode = opts?.mode ?? (looksDirtyPrompt(props.data.prompt ?? "") ? "full" : "refine");
+  lastComposeMode.value = mode;
+  try {
+    const refs = props.data.references.map((i) => i.image).filter(Boolean) as string[];
+    const { data } = await axios.post("/production/editImage/composeStillPromptPreview", {
+      projectId: props.projectId,
+      storyboardId: resolveStoryboardId(),
+      prompt: props.data.prompt ?? "",
+      qualityMode: "hq_update",
+      composeMode: mode,
+      persist: Boolean(opts?.persist && resolveStoryboardId()),
+      ratio: project.value?.videoRatio ?? props.data.ratio,
+      references: refs,
+      referenceUrlCount: refs.length,
+    });
+    const body = data?.data ?? data;
+    composePreview.value = body;
+    if (!body?.ok) {
+      gateMessage.value = body?.userMessage || body?.blockReason || "缺少可拍画面锚点";
+    } else if (body.didSynthesize || body.scrubbed) {
+      const modeLabel = mode === "fidelity" ? "更贴描述" : mode === "refine" ? "保留改写加强" : "按设计全量合成";
+      gateMessage.value = `${modeLabel}完成，可生成高质量首帧`;
+      if (opts?.autoApply && body.prompt) {
+        props.data.prompt = body.prompt;
+        promptUsedSummary.value = String(body.prompt).slice(0, 160) + (String(body.prompt).length > 160 ? "…" : "");
+      }
+    } else {
+      gateMessage.value = "提示词可生成高质量首帧";
+      if (opts?.autoApply && body.prompt) {
+        props.data.prompt = body.prompt;
+      }
+    }
+  } catch (e: any) {
+    gateMessage.value = e?.response?.data?.data?.userMessage || e?.message || "预览失败";
+  } finally {
+    previewing.value = false;
+  }
+}
+
+function applyComposePreview() {
+  if (composePreview.value?.prompt) {
+    props.data.prompt = composePreview.value.prompt;
+    gateMessage.value = "已填入设计合成稿，点击生成";
+  }
+}
+
 // 生成
-async function handleGenerate() {
+async function handleGenerate(overridePrompt?: unknown) {
   if (!props.data.model) return window.$message.error($t("workbench.production.editImage.selectModel"));
   if (!props.data.quality) return window.$message.error($t("workbench.production.editImage.selectQuality"));
+  props.data.ratio = project.value?.videoRatio ?? props.data.ratio ?? "16:9";
   if (!props.data.ratio) return window.$message.error($t("workbench.production.editImage.selectRatio"));
+  let promptText = resolveGeneratePrompt(overridePrompt, props.data.prompt);
+  const sid = resolveStoryboardId();
+  // Allow empty / token-only when storyboard linked — auto compose then generate
+  if (!promptText.trim() && !sid) {
+    return window.$message.error($t("workbench.production.editImage.promptPlaceholder"));
+  }
+  if (sid && (isTokenOnlyPrompt(promptText) || looksDirtyPrompt(promptText))) {
+    await loadComposePreview({ autoApply: true, mode: "full", persist: true });
+    if (composePreview.value?.ok && composePreview.value.prompt) {
+      promptText = composePreview.value.prompt;
+    }
+  }
   generating.value = true;
+  lastFeedback.value = null;
+  gateMessage.value = "";
+  promptUsedSummary.value = "";
   try {
+    const refs = props.data.references.map((i) => i.image).filter(Boolean) as string[];
+    const imageMode = refs.length <= 0 ? "text" : refs.length === 1 ? "singleImage" : "multiReference";
     const { data } = await axios.post("/production/editImage/generateFlowImage", {
-      references: props.data.references.map((i) => i.image).filter(Boolean),
+      references: refs,
       model: props.data.model,
       quality: props.data.quality,
-      ratio: props.data.ratio,
-      prompt: props.data.prompt,
+      ratio: project.value?.videoRatio ?? props.data.ratio,
+      prompt: promptText,
       projectId: props.projectId,
+      storyboardId: sid,
+      mode: imageMode,
+      requireParentRef: imageMode === "singleImage" && !sid,
+      qualityMode: "hq_update",
+      persistToStoryboard: Boolean(sid),
+      composeMode: lastComposeMode.value,
     });
-    props.data.generatedImage = data.url;
-  } catch (e) {
-    return window.$message.error((e as any)?.message || $t("workbench.production.editImage.generateFailed"));
+    const body = data?.data ?? data;
+    props.data.generatedImage = body.url ?? body;
+    if (body.promptUsed) {
+      props.data.prompt = body.promptUsed;
+      promptUsedSummary.value =
+        (body.didSynthesize ? "【已智能合成】" : "") +
+        String(body.promptUsed).slice(0, 180) +
+        (String(body.promptUsed).length > 180 ? "…" : "");
+    }
+    stillQuality.value = body.stillQuality ?? null;
+    gateMessage.value = body.userMessage || (body.stillQuality === "hq_ok" ? "已标记高质量首帧" : "");
+    if (body.feedback) lastFeedback.value = body.feedback;
+  } catch (e: any) {
+    const payload = e?.response?.data?.data ?? e?.data ?? {};
+    const fb = payload.feedback;
+    if (fb?.suggestedPrompt) lastFeedback.value = fb;
+    const code = payload.code ? `[${payload.code}] ` : "";
+    const cta = payload.ctaLabel ? ` → ${payload.ctaLabel}` : "";
+    gateMessage.value = code + (payload.userMessage || e?.message || $t("workbench.production.editImage.generateFailed")) + cta;
+    stillQuality.value = payload.stillQuality ?? "missing";
+    return window.$message.error(gateMessage.value);
   } finally {
     generating.value = false;
   }
+}
+
+async function retryWithSuggestion() {
+  if (!lastFeedback.value?.suggestedPrompt) return;
+  props.data.prompt = lastFeedback.value.suggestedPrompt;
+  await handleGenerate(lastFeedback.value.suggestedPrompt);
 }
 
 function handleKeep() {
@@ -202,10 +377,25 @@ onMounted(() => {
   props.data.model = project.value?.imageModel ?? "";
   props.data.quality = project.value?.imageQuality ?? "";
   props.data.ratio = project.value?.videoRatio ?? "16:9";
+  const sid = resolveStoryboardId();
+  // 默认文学稿：有分镜则静默 compose 写回并展示（empty/dirty/stale 走 full）
+  if (sid) {
+    const mode = looksDirtyPrompt(props.data.prompt ?? "") ? "full" : "refine";
+    void loadComposePreview({ autoApply: true, mode, persist: true });
+  }
 });
 </script>
 
 <style lang="scss" scoped>
+.promptSummary {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #666;
+  word-break: break-all;
+  max-height: 72px;
+  overflow: auto;
+}
 .generatedNode {
   position: relative;
   width: 320px;
@@ -322,6 +512,13 @@ onMounted(() => {
     background-color: var(--td-bg-color-container);
     border-radius: 10px;
     z-index: 9999;
+
+    .feedbackBox {
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
 
     .imageRefs {
       overflow: auto;

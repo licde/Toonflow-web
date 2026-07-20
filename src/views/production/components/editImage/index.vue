@@ -97,8 +97,9 @@ const props = withDefaults(
   defineProps<{
     flowData: {
       flowId?: number | null;
-      resultImages: { src: string; prompt: string }[]; // 结果图 url 和提示词
-      referanceImages: string[]; // 参考图url
+      resultImages: { src: string; prompt: string }[];
+      referanceImages: string[];
+      storyboardId?: number;
     };
     type?: string;
   }>(),
@@ -109,6 +110,9 @@ const props = withDefaults(
     }),
   },
 );
+
+const editStoryboardId = computed(() => props.flowData.storyboardId);
+provide("editStoryboardId", editStoryboardId);
 
 const emit = defineEmits(["save"]);
 
@@ -271,13 +275,16 @@ onMounted(async () => {
 function buildFlow() {
   const uploadIds: string[] = [];
   const generatedIds: string[] = [];
-  props.flowData.referanceImages.forEach((i: string) => {
-    uploadIds.push(addUploadNode("upload", i));
+  const refs = props.flowData.referanceImages?.length ? props.flowData.referanceImages : [""];
+  refs.forEach((i: string) => {
+    uploadIds.push(addUploadNode("upload", i || ""));
   });
   props.flowData.resultImages.forEach((i: { src: string; prompt: string }) => {
     generatedIds.push(addUploadNode("generated", i.src, i.prompt));
   });
-  // 将每个 upload 节点连接到每个 generated 节点
+  if (!generatedIds.length) {
+    generatedIds.push(addUploadNode("generated", "", props.flowData.resultImages[0]?.prompt ?? ""));
+  }
   for (const sourceId of uploadIds) {
     for (const targetId of generatedIds) {
       edges.value.push({

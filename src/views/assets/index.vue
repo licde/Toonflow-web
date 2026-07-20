@@ -34,6 +34,9 @@
                       <div class="generateImage">
                         <span @click="batchGeneration(2)">{{ $t("workbench.assets.generateImage") }}</span>
                       </div>
+                      <div class="generateImage">
+                        <span @click="handleHealAndRetry">修复并重试失败项</span>
+                      </div>
                     </div>
                   </template>
                 </t-popup>
@@ -718,13 +721,14 @@ async function handleBatchGeneratePrompt() {
     await axios.post("/assetsGenerate/batchPolishAssetsPrompt", {
       projectId: project.value?.id,
       concurrentCount: otherSetting.value.assetsBatchGenereateSize,
-      items: selectedAssets.map((item: { id: number; name: string; type: string; describe: string }) => ({
+      items: selectedAssets.map((item: { id: number; name: string; type: string; describe: string; prompt?: string }) => ({
         assetsId: item.id,
-        type: item.type ?? "props",
+        type: item.type === "props" ? "tool" : item.type ?? "role",
         name: item.name,
-        describe: item.describe ? item.describe : $t("workbench.assets.noDescription"),
+        describe: item.describe || item.prompt || item.name || "",
       })),
     });
+    window.$message.success($t("workbench.assets.promptGenStart") || `已提交 ${selectedAssets.length} 条提示词润色`);
   } catch (e: any) {
     window.$message.error(e?.message ?? $t("workbench.assets.promptGenFail"));
   }
@@ -747,7 +751,7 @@ async function handleBatchGenerateImage() {
     return;
   }
 
-  // 过滤掉没有 prompt 的资产
+  // 过滤掉没有 prompt 的资产；弱/stub 交由后端 soft-defer（先润色再出图），前端不再预跳过
   const validAssets = selectedAssets.filter((asset) => {
     if (!asset.prompt) {
       window.$message.warning($t("workbench.assets.noPromptForImage", { name: asset.name }));
@@ -775,18 +779,25 @@ async function handleBatchGenerateImage() {
   batchGenerationShow.value = false;
 
   try {
-    await axios.post("/assetsGenerate/batchGenerateImageAssets", {
+    const res = await axios.post("/assetsGenerate/batchGenerateImageAssets", {
       projectId: project.value?.id,
       model: selectValue.value,
       resolution: resolution.value,
       concurrentCount: otherSetting.value.assetsBatchGenereateSize,
       items: validAssets.map((item) => ({
         id: item.id,
-        type: item.type ?? "props",
+        type: item.type === "props" ? "tool" : item.type ?? "role",
         name: item.name ?? $t("workbench.cornerScape.unnamed"),
         prompt: item.prompt || item.describe,
       })),
     });
+    const data = (res as any)?.data?.data ?? (res as any)?.data ?? {};
+    if (Array.isArray(data.deferred) && data.deferred.length) {
+      window.$message.info(
+        data.message ||
+          `已受理 ${data.accepted ?? 0}；暂缓 ${data.deferred.length}（请先批量生成提示词）`,
+      );
+    }
   } catch (e: any) {
     window.$message.error($t("workbench.assets.imageGenFail", { name: "", error: e.message ?? "" }));
     validAssets.forEach((asset) => {
@@ -1224,14 +1235,26 @@ async function pollingPromptAssets() {
   try {
     const { data } = await axios.post("/assets/pollingPromptAssets", { ids });
     if (Array.isArray(data) && data.length) {
-      data.forEach((item: { id: number; promptState: string; prompt: string }) => {
+      let failCount = 0;
+      const failReasons: string[] = [];
+      data.forEach((item: { id: number; promptState: string; prompt: string; promptErrorReason?: string; name?: string }) => {
         const target = findAssetById(item.id);
         if (target) {
           target.promptState = item.promptState;
           if (item.prompt !== undefined) target.prompt = item.prompt;
+          if (item.promptErrorReason !== undefined) (target as any).promptErrorReason = item.promptErrorReason;
+          if (item.promptState === "生成失败") {
+            failCount++;
+            failReasons.push(`${item.name || target.name || item.id}:${item.promptErrorReason || "未知错误"}`);
+          }
         }
       });
       getFilteredData(assetOptions.value);
+      if (failCount > 0 && notCompultedData.value.length === 0) {
+        window.$message.warning(
+          `提示词失败 ${failCount} 条：${failReasons.slice(0, 3).join("；")}${failReasons.length > 3 ? "…" : ""}`,
+        );
+      }
     }
   } catch (e) {
     console.error("轮询提示词状态失败:", e);
@@ -1244,22 +1267,132 @@ async function pollingImageAssets() {
   try {
     const { data } = await axios.post("/assets/pollingImageAssets", { ids });
     if (Array.isArray(data) && data.length) {
-      data.forEach((item: { id: number; state: string; filePath: string; src?: string }) => {
-        const target = findAssetById(item.id);
-        if (target) {
-          target.state = item.state;
-          if (item.filePath !== undefined) target.filePath = item.filePath;
-          if (item.src !== undefined) target.src = item.src;
-          // filePath 存在时也作为 src 使用，确保图片立即显示
-          if (!item.src && item.filePath && item.state !== "生成中") {
-            target.src = item.filePath;
+      let failCount = 0;
+      const failReasons: string[] = [];
+      let healHint = false;
+      data.forEach(
+        (item: {
+          id: number;
+          state: string;
+          filePath: string;
+          src?: string;
+          errorMessage?: string;
+          nextStep?: string;
+          name?: string;
+        }) => {
+          const target = findAssetById(item.id);
+          if (target) {
+            target.state = item.state;
+            if (item.filePath !== undefined) target.filePath = item.filePath;
+            if (item.src !== undefined) target.src = item.src;
+            if (!item.src && item.filePath && item.state !== "生成中") {
+              target.src = item.filePath;
+            }
+            if (item.errorMessage) (target as any).errorReason = item.errorMessage;
+            if (item.nextStep) (target as any).nextStep = item.nextStep;
+            if (item.state === "生成失败") {
+              failCount++;
+              failReasons.push(`${item.name || target.name || item.id}:${item.errorMessage || "未知错误"}`);
+              if (item.nextStep === "batch_still") healHint = true;
+            }
           }
-        }
-      });
+        },
+      );
       getFilteredData(assetOptions.value);
+      if (failCount > 0 && generatingData.value.length === 0) {
+        window.$message.warning(
+          `图片失败 ${failCount} 条：${failReasons.slice(0, 3).join("；")}${failReasons.length > 3 ? "…" : ""}${
+            healHint ? "（可用「修复并重试失败项」）" : ""
+          }`,
+        );
+      }
     }
   } catch (e) {
     console.error("轮询图片生成状态失败:", e);
+  }
+}
+
+/** 修复并重试：提示词失败→再润色/补全；定妆失败且 prompt 已完成→只重生图（不换脸） */
+async function handleHealAndRetry() {
+  const all = getAllAssetsFlat();
+  const promptFailed = all.filter(
+    (a) =>
+      a.promptState === "生成失败" ||
+      String((a as any).promptErrorReason ?? "").includes("complete_failed"),
+  );
+  const imageFailed = all.filter((a) => a.state === "生成失败");
+  if (promptFailed.length === 0 && imageFailed.length === 0) {
+    window.$message.info("没有失败项可重试");
+    return;
+  }
+
+  if (promptFailed.length > 0) {
+    promptFailed.forEach((asset) => {
+      const target = findAssetById(asset.id);
+      if (target) target.promptState = "生成中";
+    });
+    try {
+      await axios.post("/assetsGenerate/batchPolishAssetsPrompt", {
+        projectId: project.value?.id,
+        concurrentCount: otherSetting.value.assetsBatchGenereateSize,
+        items: promptFailed.map((item) => ({
+          assetsId: item.id,
+          type: item.type === "props" ? "tool" : item.type ?? "role",
+          name: item.name,
+          describe: item.describe || item.prompt || item.name || "",
+        })),
+      });
+      window.$message.success(`已重提交 ${promptFailed.length} 条提示词补全/修复`);
+    } catch (e: any) {
+      window.$message.error(e?.message ?? "提示词重试失败");
+    }
+  }
+
+  const stillRetry = imageFailed.filter((a) => {
+    const next = (a as any).nextStep;
+    return (!next || next === "batch_still") && a.promptState === "已完成";
+  });
+  const needPolishFirst = imageFailed.filter((a) => {
+    const next = (a as any).nextStep;
+    return (!next || next === "batch_still") && a.promptState !== "已完成";
+  });
+  if (needPolishFirst.length && promptFailed.length === 0) {
+    window.$message.info(
+      `有 ${needPolishFirst.length} 项定妆失败且提示词未就绪，请先「批量生成提示词」`,
+    );
+  }
+  if (stillRetry.length > 0) {
+    if (!selectValue.value) {
+      window.$message.warning("请先在批量弹窗选择模型，或先走「批量生成图片」选好模型后再重试");
+      batchGeneration(2);
+      return;
+    }
+    stillRetry.forEach((asset) => {
+      const target = findAssetById(asset.id);
+      if (target) target.state = "生成中";
+    });
+    try {
+      await axios.post("/assetsGenerate/batchGenerateImageAssets", {
+        projectId: project.value?.id,
+        model: selectValue.value,
+        resolution: resolution.value || "1K",
+        concurrentCount: otherSetting.value.assetsBatchGenereateSize,
+        items: stillRetry.map((item) => ({
+          id: item.id,
+          type: item.type === "props" ? "tool" : item.type ?? "role",
+          name: item.name ?? "",
+          prompt: item.prompt || item.describe || item.name || "",
+        })),
+      });
+      window.$message.success(`已重提交 ${stillRetry.length} 条定妆生图（不换脸）`);
+      startImagePolling();
+    } catch (e: any) {
+      window.$message.error(e?.message ?? "定妆重试失败");
+      stillRetry.forEach((asset) => {
+        const target = findAssetById(asset.id);
+        if (target) target.state = "生成失败";
+      });
+    }
   }
 }
 function startPolling() {

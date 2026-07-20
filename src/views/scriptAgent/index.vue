@@ -1,5 +1,23 @@
 <template>
   <div class="scriptAgent">
+    <div v-if="adaptSteps.length" class="adaptStepsBar">
+      <div class="adaptStepsHeader f ac jb">
+        <span class="adaptStepsTitle">{{ $t("workbench.scriptAgent.adaptationSteps") }}</span>
+        <t-space size="small">
+          <t-button size="small" variant="outline" :loading="enteringProduction" :disabled="!canEnterProduction" @click="handleEnterProduction">
+            {{ $t("workbench.scriptAgent.enterProduction") }}
+          </t-button>
+        </t-space>
+      </div>
+      <t-steps :current="adaptCurrentStep" readonly class="adaptSteps">
+        <t-step-item
+          v-for="step in adaptSteps"
+          :key="step.id"
+          :title="step.label"
+          :status="stepStatusMap(step)"
+          :content="step.locked ? step.lockReason : step.done ? $t('workbench.scriptAgent.stepDone') : ''" />
+      </t-steps>
+    </div>
     <Splitpanes class="default-theme data f">
       <Pane :size="30" :min-size="15" class="operate">
         <div class="box pr">
@@ -219,6 +237,9 @@ const { project } = storeToRefs(projectStore());
 import editMdPreivew from "@/components/editMdPreivew.vue";
 import scriptAgentStore from "@/stores/scriptAgent";
 const { connected, messages, status, planData, thinkLevel } = storeToRefs(scriptAgentStore());
+import { getAdaptationSteps, enterProduction } from "@/utils/ruleEngine";
+import { useAdaptationNav } from "@/composables/useAdaptationNav";
+import { useRoute } from "vue-router";
 const thinkLevelOptions = [
   { label: $t("workbench.scriptAgent.thinkLevel.off"), value: 0 },
   { label: $t("workbench.scriptAgent.thinkLevel.light"), value: 1 },
@@ -226,6 +247,15 @@ const thinkLevelOptions = [
   { label: $t("workbench.scriptAgent.thinkLevel.extreme"), value: 3 },
 ];
 import productionAgentStore from "@/stores/productionAgent";
+const route = useRoute();
+const { goProduction } = useAdaptationNav();
+const adaptSteps = ref<
+  { id: string; label: string; done: boolean; locked: boolean; lockReason?: string; status: string }[]
+>([]);
+const adaptCurrentStep = ref(0);
+const w3Unlocked = ref(true);
+const enteringProduction = ref(false);
+const canEnterProduction = computed(() => w3Unlocked.value && (planData.value.script?.length ?? 0) > 0);
 const currentTable = ref(1);
 const inputValue = ref("");
 const toolbars: ToolbarNames[] = [
@@ -270,10 +300,63 @@ onMounted(() => {
   if (messages.value.length <= 0) messages.value = [...defMsg, ...messages.value];
   getPlanData();
   getNovel();
+  loadAdaptationSteps();
   scriptAgentStore().connect();
 
   if (messages.value.length <= 1) getHistory();
+
+  const mode = route.query.mode;
+  const stage = typeof route.query.stage === "string" ? route.query.stage.toUpperCase() : "";
+  if (mode === "original") {
+    currentTable.value = 3;
+    window.$message.info($t("workbench.scriptAgent.originalModeHint"));
+  } else if (mode === "adapt" || stage) {
+    currentTable.value = 1;
+    if (stage) {
+      window.$message.info(`回到设计舞台 ${stage}${route.query.trigger ? ` · ${route.query.trigger}` : ""}`);
+    }
+  }
 });
+
+async function loadAdaptationSteps() {
+  if (!project.value?.id) return;
+  try {
+    const data = await getAdaptationSteps(project.value.id);
+    adaptSteps.value = data.steps;
+    w3Unlocked.value = data.w3Unlocked;
+    const firstPending = data.steps.findIndex((s) => !s.done);
+    adaptCurrentStep.value = firstPending === -1 ? data.steps.length - 1 : firstPending;
+  } catch {
+    adaptSteps.value = [];
+  }
+}
+
+function stepStatusMap(step: { done: boolean; locked: boolean; status: string }) {
+  if (step.done || step.status === "done") return "finish";
+  if (step.locked) return "default";
+  if (step.status === "running") return "process";
+  return "default";
+}
+
+async function handleEnterProduction() {
+  if (!project.value?.id || !planData.value.script?.length) return;
+  const firstScript = planData.value.script[0];
+  enteringProduction.value = true;
+  try {
+    const { data: scripts } = await axios.post("/script/getScrptApi", { projectId: project.value.id, name: firstScript.name });
+    const match = (scripts as { id: number; name: string }[]).find((s) => s.name === firstScript.name);
+    if (match) {
+      await enterProduction({ projectId: project.value.id, scriptId: match.id, autoDesign: true });
+      goProduction(match.id);
+      return;
+    }
+    window.$message.warning($t("workbench.scriptAgent.noScriptForProduction"));
+  } catch (e) {
+    window.$message.error((e as Error)?.message || $t("workbench.scriptAgent.enterProductionFailed"));
+  } finally {
+    enteringProduction.value = false;
+  }
+}
 const agentWorkDataId = ref<number>();
 async function getPlanData() {
   const { data } = await axios.post("/scriptAgent/getPlanData", { projectId: project.value?.id, agentType: "scriptAgent" });
@@ -503,6 +586,22 @@ function toggleAllCards() {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  .adaptStepsBar {
+    flex-shrink: 0;
+    margin-bottom: 8px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--td-border-level-1-color);
+    background: var(--td-bg-color-container);
+    .adaptStepsTitle {
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .adaptSteps {
+      margin-top: 8px;
+      overflow-x: auto;
+    }
+  }
   :deep(.splitpanes__pane) {
     background-color: transparent !important;
   }

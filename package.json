@@ -23,7 +23,8 @@
     "type-check": "node scripts/generate-dts.mjs && vue-tsc --build --pretty false",
     "postinstall": "node scripts/fix-tdesign-icons.mjs && node scripts/fix-tdesign-packages.mjs",
     "license": "node scripts/license.ts",
-    "i18n:check": "node scripts/findUnusedI18n.ts"
+    "i18n:check": "node scripts/findUnusedI18n.ts",
+    "test:prompt-refs": "npx --yes tsx scripts/test-prompt-refs-smoke.ts"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",

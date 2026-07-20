@@ -63,6 +63,7 @@
               <t-button theme="primary" block @click="batchGenerationImage">
                 {{ $t("workbench.cornerScape.startBatch") }}
               </t-button>
+              <t-button theme="default" block style="margin-top: 8px" @click="healAndRetryFailed">修复并重试失败项</t-button>
             </div>
           </t-form-item>
         </t-form>
@@ -700,9 +701,9 @@ async function batchGenerationImage() {
   }
 
   const items = dataList.value.filter((item) => selectedIds.value.includes(item.id));
-  //检查如果勾选的数据prompt有空的，提示用户勾选的哪一个提示词未生成，然后终止批量生成
   const emptyPrompts = items.filter((item) => !item.prompt);
-  if (emptyPrompts.length > 0) {
+  const readyItems = items.filter((item) => item.prompt);
+  if (emptyPrompts.length > 0 && readyItems.length === 0) {
     const emptyPromptNames = emptyPrompts.map((item) => item.name).join(", ");
     window.$message.warning(
       $t("workbench.cornerScape.msg.emptyPrompt", {
@@ -711,31 +712,101 @@ async function batchGenerationImage() {
     );
     return;
   }
+  if (emptyPrompts.length > 0) {
+    window.$message.info(
+      `已跳过 ${emptyPrompts.length} 个空提示词，继续生成 ${readyItems.length} 项`,
+    );
+  }
 
-  // 前端先将所有选中项标记为"生成中"
-  items.forEach((item) => setItemState(item.id, "生成中"));
+  // 前端先将可生成项标记为"生成中"
+  readyItems.forEach((item) => setItemState(item.id, "生成中"));
 
   window.$message.success(
-    $t("workbench.cornerScape.msg.batchStarted", { count: items.length, concurrent: otherSetting.value.assetsBatchGenereateSize }),
+    $t("workbench.cornerScape.msg.batchStarted", {
+      count: readyItems.length,
+      concurrent: otherSetting.value.assetsBatchGenereateSize,
+    }),
   );
 
   try {
-    await axios.post("/assetsGenerate/batchGenerateImageAssets", {
+    const res = await axios.post("/assetsGenerate/batchGenerateImageAssets", {
       projectId: project.value?.id,
       model: selectValue.value,
       resolution: resolution.value,
       concurrentCount: otherSetting.value.assetsBatchGenereateSize,
-      items: items.map((item) => ({
+      items: readyItems.map((item) => ({
         id: item.id,
-        type: item.type ?? "props",
+        type: item.type === "props" ? "tool" : item.type ?? "role",
         name: item.name ?? $t("workbench.cornerScape.unnamed"),
         prompt: item.prompt,
       })),
     });
+    const data = (res as any)?.data?.data ?? (res as any)?.data ?? {};
+    if (Array.isArray(data.deferred) && data.deferred.length) {
+      window.$message.info(
+        data.message ||
+          `已受理 ${data.accepted ?? 0}；暂缓 ${data.deferred.length}（请先批量生成提示词）`,
+      );
+    }
     selectedIds.value = [];
   } catch (e: any) {
     if (e.name === "CanceledError" || e.code === "ERR_CANCELED") return;
     window.$message.error(e.message ?? $t("workbench.cornerScape.msg.batchFailed"));
+  }
+}
+
+/** 修复并重试：提示词失败→润色；定妆失败且已完成提示词→重生图 */
+async function healAndRetryFailed() {
+  const promptFailed = dataList.value.filter(
+    (a) => a.promptState === "生成失败" || String((a as any).promptErrorReason ?? "").includes("complete_failed"),
+  );
+  const imageFailed = dataList.value.filter((a) => a.state === "生成失败");
+  if (!promptFailed.length && !imageFailed.length) {
+    window.$message.info("没有失败项可重试");
+    return;
+  }
+  if (promptFailed.length) {
+    try {
+      await axios.post("/assetsGenerate/batchPolishAssetsPrompt", {
+        projectId: project.value?.id,
+        concurrentCount: otherSetting.value.assetsBatchGenereateSize,
+        otherTextPrompt: otherTextPrompt.value,
+        items: promptFailed.map((item) => ({
+          assetsId: item.id,
+          type: item.type === "props" ? "tool" : item.type ?? "role",
+          name: item.name,
+          describe: item.describe || item.prompt || item.name || "",
+        })),
+      });
+      window.$message.success(`已重提交 ${promptFailed.length} 条提示词补全/修复`);
+    } catch (e: any) {
+      window.$message.error(e?.message ?? "提示词重试失败");
+    }
+  }
+  const stillRetry = imageFailed.filter((a) => a.promptState === "已完成");
+  if (stillRetry.length) {
+    if (!selectValue.value) {
+      window.$message.warning($t("workbench.cornerScape.msg.selectModel"));
+      return;
+    }
+    stillRetry.forEach((item) => setItemState(item.id, "生成中"));
+    try {
+      await axios.post("/assetsGenerate/batchGenerateImageAssets", {
+        projectId: project.value?.id,
+        model: selectValue.value,
+        resolution: resolution.value,
+        concurrentCount: otherSetting.value.assetsBatchGenereateSize,
+        items: stillRetry.map((item) => ({
+          id: item.id,
+          type: item.type === "props" ? "tool" : item.type ?? "role",
+          name: item.name ?? "",
+          prompt: item.prompt || item.describe || item.name || "",
+        })),
+      });
+      window.$message.success(`已重提交 ${stillRetry.length} 条定妆生图`);
+    } catch (e: any) {
+      window.$message.error(e?.message ?? "定妆重试失败");
+    }
   }
 }
 //轮询

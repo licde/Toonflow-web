@@ -87,6 +87,13 @@
             </template>
           </t-button>
         </t-tooltip>
+        <t-tooltip placement="bottom" theme="primary" :content="$t('workbench.production.importScriptBundle.tooltip')">
+          <t-button variant="outline" style="margin-left: 8px" @click="importScriptBundleVisible = true">
+            <template #icon>
+              <i-file-text size="16" />
+            </template>
+          </t-button>
+        </t-tooltip>
         <i-loading-four class="spin" size="16" style="margin-left: 0.5rem" v-show="loading"></i-loading-four>
         <!-- <t-tooltip theme="primary" content="$t('workbench.production.autoLayoutTB')">
           <div class="item c" @click="layoutGraph('TB')">
@@ -104,6 +111,11 @@
     <t-guide v-model="current" :steps="steps" @finish="() => (current = -1)" />
     <t-tag variant="outline" class="fps" v-if="!openShowVisible">{{ fps }}</t-tag>
     <importTestFixture v-model:visible="importFixtureVisible" :project-id="Number(project?.id ?? 0)" :script-id="episodesId" />
+    <importScriptBundle
+      v-model:visible="importScriptBundleVisible"
+      :project-id="Number(project?.id ?? 0)"
+      :script-id="episodesId"
+      @imported="onScriptBundleImported" />
   </VueFlow>
 </template>
 
@@ -124,6 +136,9 @@ const storyboard = defineAsyncComponent(() => import("./node/storyboard.vue"));
 const workbench = defineAsyncComponent(() => import("./node/workbench.vue"));
 const rightChatBox = defineAsyncComponent(() => import("./components/rightChatBox/index.vue"));
 const importTestFixture = defineAsyncComponent(() => import("./components/importTestFixture/index.vue"));
+const importScriptBundle = defineAsyncComponent(() => import("./components/importScriptBundle/index.vue"));
+import { useRoute, useRouter } from "vue-router";
+import { useAdaptationNav } from "@/composables/useAdaptationNav";
 import { useLayout } from "./utils/dagre";
 import { useFlowBuilder } from "./utils/flowBuilder";
 import axios from "@/utils/axios";
@@ -205,6 +220,10 @@ provide("episodesId", episodesId);
 
 const loading = ref(false);
 const importFixtureVisible = ref(false);
+const importScriptBundleVisible = ref(false);
+const route = useRoute();
+const router = useRouter();
+const { OPEN_SCRIPT_IMPORT_KEY } = useAdaptationNav();
 
 // 节点位置
 const nodePositions = ref<Record<string, { x: number; y: number }>>({
@@ -252,14 +271,40 @@ async function waitForNodesReady(maxRetries = 60, delay = 100) {
 }
 
 onMounted(async () => {
-  await getScriptData();
+  const queryScriptId = Number(route.query.scriptId);
+  const preserveId = Number.isFinite(queryScriptId) && queryScriptId > 0 ? queryScriptId : undefined;
+  await getScriptData(preserveId);
+
+  const openImport = sessionStorage.getItem(OPEN_SCRIPT_IMPORT_KEY);
+  if (openImport === "script" || route.query.import === "script" || route.query.import === "1") {
+    sessionStorage.removeItem(OPEN_SCRIPT_IMPORT_KEY);
+    importScriptBundleVisible.value = true;
+    if (route.query.import) {
+      router.replace({
+        path: "/production",
+        query: episodesId.value ? { scriptId: String(episodesId.value) } : {},
+      });
+    }
+  }
+
   if (!episodesId.value) return;
+  if (episodesId.value && String(route.query.scriptId) !== String(episodesId.value)) {
+    await router.replace({ path: "/production", query: { scriptId: String(episodesId.value) } });
+  }
 
   const nodesReady = await waitForNodesReady();
   if (nodesReady) {
     await layoutGraph();
   }
 });
+
+async function onScriptBundleImported(scriptId: number) {
+  episodesId.value = scriptId;
+  await getScriptData(scriptId);
+  await router.replace({ path: "/production", query: { scriptId: String(scriptId) } });
+  await productionAgentStore().getFlowData();
+  await layoutGraph();
+}
 
 const episodesOptions = ref<{ label: string; value: number }[]>([]);
 function confirmEpisodesSwitch() {
@@ -299,11 +344,12 @@ function handleEpisodesChange(value: unknown) {
     if (!(await confirmEpisodesSwitch())) return;
 
     episodesId.value = nextEpisodesId;
+    await router.replace({ path: "/production", query: { scriptId: String(nextEpisodesId) } });
     await productionAgentStore().getFlowData();
   })();
 }
 
-async function getScriptData() {
+async function getScriptData(preserveId?: number) {
   //获取剧本
   const { data: scriptRes } = await axios.post("/script/getScrptApi", {
     projectId: project.value?.id,
@@ -313,8 +359,10 @@ async function getScriptData() {
     label: ep.name,
     value: ep.id,
   }));
+  const preferId = preserveId ?? episodesId.value;
   if (episodesOptions.value.length) {
-    episodesId.value = episodesOptions.value[0].value;
+    const matched = preferId && episodesOptions.value.some((o) => o.value === preferId);
+    episodesId.value = matched ? preferId : episodesOptions.value[0].value;
   }
   if (status.value !== "pending" && status.value !== "streaming") {
     episodesId.value && (await productionAgentStore().getFlowData());

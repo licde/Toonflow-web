@@ -19,7 +19,9 @@
       :script-plan="flowData.scriptPlan"
       :storyboard-table="storyboardTable"
       :storyboard="flowData.storyboard"
-      @report="onValidationReport" />
+      @report="onValidationReport"
+      @re-push="onRePush"
+      @autofix="onAutofix" />
   </t-card>
 
   <t-dialog
@@ -58,7 +60,9 @@ import projectStore from "@/stores/project";
 import rulePanel from "../components/rulePanel/index.vue";
 import pipelineGateBar from "../components/pipelineGateBar/index.vue";
 import type { ValidationReport } from "@/types/ruleEngine";
+import { useAdaptationNav } from "@/composables/useAdaptationNav";
 
+const { goDesignStage } = useAdaptationNav();
 const { themeSetting } = storeToRefs(settingStore());
 const { episodesId, flowData } = storeToRefs(productionAgentStore());
 const { project } = storeToRefs(projectStore());
@@ -67,6 +71,14 @@ const validationReport = ref<ValidationReport | null>(null);
 
 function onValidationReport(r: ValidationReport) {
   validationReport.value = r;
+}
+
+function onRePush(item: { reverseTarget: string; trigger: string }) {
+  goDesignStage(item.reverseTarget, item.trigger);
+}
+
+function onAutofix(issue: { ruleId?: string; fieldPath?: string }) {
+  window.$message.info(`自动修复 ${issue.ruleId ?? ""} → ${issue.fieldPath ?? ""}`);
 }
 
 const props = defineProps<{
