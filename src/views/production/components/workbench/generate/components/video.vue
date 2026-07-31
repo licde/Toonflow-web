@@ -1,7 +1,23 @@
 <template>
   <t-card :title="'#' + (activeTrackIndex + 1) + $t('workbench.generate.videoMenu')" header-bordered style="height: 100%">
     <template #actions>
-      <t-button size="small" :loading="generating" @click="emit('generate')">{{ $t("workbench.generate.generate") }}</t-button>
+      <t-button
+        size="small"
+        :loading="generating"
+        :disabled="currentTrack?.state === '需完善' || currentTrack?.burnAllowed === false"
+        :title="
+          currentTrack?.state === '需完善' || currentTrack?.burnAllowed === false
+            ? '提示词需完善，不可烧片'
+            : undefined
+        "
+        @click="emit('generate')"
+      >
+        {{
+          currentTrack?.state === "需完善" || currentTrack?.burnAllowed === false
+            ? "需完善·不可烧"
+            : $t("workbench.generate.generate")
+        }}
+      </t-button>
     </template>
     <div class="history">
       <div class="titleBox f ac">
@@ -41,7 +57,7 @@
             <t-loading size="24px" />
             <span class="loadingText">{{ $t("workbench.generate.generating") }}</span>
           </div>
-          <t-tooltip v-if="v.state == '生成失败'" placement="top" :content="v?.errorReason! ?? ''" theme="light">
+          <t-tooltip v-if="v.state == '生成失败'" placement="top" :content="formatVideoFailTip(v)" theme="light">
             <t-tag class="stateTag" theme="danger" size="small">
               {{ $t("workbench.generate.generateFailed") }}
             </t-tag>
@@ -101,6 +117,34 @@ const selectVideoId = ref();
 const videoCoverMap = ref<Record<string, string>>({});
 const videoPlayerVisible = ref(false);
 const playingVideoSrc = ref<string>();
+
+/** Prefer CTA/userMessage over raw JSON blob in failure tooltip. */
+function formatVideoFailTip(v: { errorReason?: string | null }) {
+  const raw = String(v?.errorReason ?? "").trim();
+  if (!raw) return $t("workbench.generate.generateFailed");
+  if (!raw.startsWith("{")) {
+    if (/VIDEO-PROMPT-STALE|video_prompt_stale|须重编译/i.test(raw)) {
+      return `${raw.slice(0, 160)} · 重编译视频提示词`.slice(0, 220);
+    }
+    return raw.slice(0, 200);
+  }
+  try {
+    const j = JSON.parse(raw) as Record<string, unknown>;
+    const pb = (j.postBurn as Record<string, unknown> | undefined) ?? undefined;
+    const um = String(j.userMessage || pb?.userMessage || j.message || "");
+    let cta = String(j.ctaLabel || "");
+    const code = String(j.code || pb?.code || "");
+    const trigger = String(j.reverseTrigger || "");
+    const step = String(j.primaryNextStep || pb?.primaryNextStep || "");
+    if (!cta && /VIDEO-PROMPT-STALE|video_prompt_stale/i.test(`${code} ${trigger} ${um}`)) {
+      cta = "重编译视频提示词";
+    }
+    const bits = [um, cta, step ? `(${step})` : ""].filter(Boolean);
+    return bits.join(" · ").slice(0, 220) || raw.slice(0, 120);
+  } catch {
+    return raw.slice(0, 200);
+  }
+}
 
 /** 选中历史视频并同步到后端 */
 async function selectVideo(v: HistoryVideoItem) {

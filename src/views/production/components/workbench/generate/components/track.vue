@@ -30,6 +30,12 @@
             @click.stop
             @change="(val: boolean) => toggleCheck(track.id, val)" />
           <t-tag class="indexTag" size="small">#{{ index + 1 }}</t-tag>
+          <t-tag
+            class="needsFixTag"
+            theme="warning"
+            size="small"
+            v-if="track.state === '需完善' || track.burnAllowed === false"
+          >需完善</t-tag>
           <t-tag class="selectTag" theme="success" size="small" v-if="track.selectVideoId">已选择</t-tag>
           <!-- 优先展示选中视频的首帧 -->
           <div class="thumbGroup" v-if="track.selectVideoId && getSelectedVideoSrc(track)">
@@ -71,6 +77,7 @@
 import type { Ref } from "vue";
 import "@/views/production/components/workbench/type/type";
 import axios from "@/utils/axios";
+import { toastBatchSoftDefer } from "@/utils/v5OpsHelpers";
 import projectStore from "@/stores/project";
 import imageListCacheStore from "@/stores/imageListCache";
 import JSZip from "jszip";
@@ -244,7 +251,9 @@ const generateTextLoad = ref(false);
 function batchGenText() {
   generateTextLoad.value = true;
   const trackData: any[] = [];
-  trackList.value.forEach((track, index) => {
+  const queuedIds: number[] = [];
+  const prevState = new Map<number, TrackItem["state"]>();
+  trackList.value.forEach((track) => {
     if (!checkedTrackIds.value.includes(track.id)) return;
     const trackId = track.id;
     let info = [];
@@ -257,29 +266,35 @@ function batchGenText() {
       trackId,
       info: info.filter((i) => typeof i.id === "number" && !isNaN(i.id)),
     });
+    prevState.set(trackId, track.state);
+    queuedIds.push(trackId);
     track.state = "生成中";
   });
   axios
     .post("/production/workbench/batchGeneratePrompt", {
       projectId: project.value?.id,
+      scriptId: episodesId.value,
       trackData,
       model: props.modelParmas.model,
       mode: props.modelParmas.mode,
       concurrentCount: otherSetting.value.assetsBatchGenereateSize,
     })
-    .then(({ data }) => {
+    .then(() => {
       window.$message.success("开始生成提示词");
-      generateTextLoad.value = false;
       checkedTrackIds.value = [];
       checkAll.value = false;
     })
     .catch((e) => {
       window.$message.error(e?.message ?? "生成提示词失败");
+      // Only revert queued tracks — never forge 生成失败 on unrelated rows
       trackList.value.forEach((i) => {
-        i.state = "生成失败";
+        if (!queuedIds.includes(i.id)) return;
+        i.state = prevState.get(i.id) ?? "未生成";
       });
     })
-    .finally(() => {});
+    .finally(() => {
+      generateTextLoad.value = false;
+    });
 }
 /**
  * 获取指定轨道的上传数据：
@@ -311,6 +326,12 @@ function batchGenVideo() {
       const checkedTrackData = trackList.value.filter((track) => checkedTrackIds.value.includes(track.id));
       const notHasPrompt = checkedTrackData.filter((i) => !i.prompt);
       if (notHasPrompt.length) return window.$message.warning($t("workbench.generate.skipDataWithEmptyVideoPromptWords"));
+      const notBurnReady = checkedTrackData.filter((i) => i.state === "需完善" || i.burnAllowed === false);
+      if (notBurnReady.length) {
+        return window.$message.warning(
+          `有 ${notBurnReady.length} 条轨道提示词「需完善」不可烧片，请先重编译或按清单修复`,
+        );
+      }
 
       const trackData = checkedTrackData.map((track) => {
         const trackId = track.id;
@@ -332,11 +353,26 @@ function batchGenVideo() {
         trackData,
       };
       try {
-        const { data } = await axios.post("/production/workbench/batchGenerateVideo", requestData);
+        const envelope = await axios.post("/production/workbench/batchGenerateVideo", requestData);
+        const payload = (envelope as { data?: Record<string, unknown> })?.data ?? envelope;
+        const summary =
+          payload && typeof payload === "object" && "summary" in payload
+            ? (payload.summary as {
+                total?: number;
+                burning?: number;
+                softDeferred?: number;
+                honestPartial?: boolean;
+                note?: string;
+              })
+            : undefined;
+        const tasks = Array.isArray(payload)
+          ? payload
+          : ((payload as { tasks?: { videoId?: number; trackId?: number; skipped?: boolean }[] })?.tasks ?? []);
         const videoRecordId: Record<number, number> = {};
-        data.forEach((item: { videoId: number; trackId: number }) => {
+        for (const item of tasks) {
+          if (item.skipped || item.videoId == null || item.trackId == null) continue;
           videoRecordId[item.trackId] = item.videoId;
-        });
+        }
         checkedTrackData.forEach((i) => {
           if (videoRecordId[i.id])
             i.videoList.push({
@@ -346,7 +382,7 @@ function batchGenVideo() {
             });
         });
         checkedTrackIds.value = [];
-        window.$message.success($t("workbench.generate.generateStarted"));
+        toastBatchSoftDefer(summary, $t("workbench.generate.generateStarted"));
       } catch (e) {
         window.$message.error((e as any)?.message ?? $t("workbench.generate.generateError"));
       } finally {

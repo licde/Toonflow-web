@@ -29,6 +29,9 @@
         <div class="imageTitleWrap" v-if="item.sources == 'storyboard' && item.index != null">
           {{ `P${item.index + 1}` }}
         </div>
+        <t-tag v-if="isWeakStill(item)" size="small" theme="warning" variant="light" class="slotWeakTag">
+          {{ stillBadge(item) }}
+        </t-tag>
         <div class="clearBtn" @click="splitImage(index)">
           <i-close size="12" />
         </div>
@@ -66,6 +69,15 @@
           <div class="imageTitleWrap" v-if="imageList?.[index]?.sources == 'storyboard' && imageList?.[index]?.index != null">
             {{ `P${imageList[index]?.index + 1}` }}
           </div>
+          <t-tag
+            v-if="imageList?.[index] && isWeakStill(imageList[index]!)"
+            size="small"
+            theme="warning"
+            variant="light"
+            class="slotWeakTag"
+          >
+            {{ stillBadge(imageList[index]!) }}
+          </t-tag>
           <div class="clearBtn" @click.stop="clearImage(index)">
             <i-close size="12" />
           </div>
@@ -104,6 +116,15 @@
               <span style="font-size: 20px">{{ `分镜 ${sb?.index + 1 || ""}` }}</span>
             </t-tooltip>
           </div>
+          <t-tag
+            v-if="isWeakStill(sb)"
+            size="small"
+            theme="warning"
+            variant="light"
+            class="weakStillTag"
+          >
+            {{ stillBadge(sb) }}
+          </t-tag>
         </div>
       </div>
     </t-dialog>
@@ -116,6 +137,28 @@ import "@/views/production/components/workbench/type/type";
 import assetsCheck, { type AssetType, type ClipMediaType } from "@/utils/assetsCheck";
 import axios from "@/utils/axios";
 import imageListCacheStore from "@/stores/imageListCache";
+import { stillQualityBadgeLabel, type StillMeta } from "@/types/stillQuality";
+
+function isWeakStill(sb: {
+  stateHint?: string;
+  stillQuality?: string;
+  visualPass?: boolean;
+  sheetLeak?: boolean;
+}): boolean {
+  return sb.stateHint === "weak_keep" || sb.stillQuality === "weak" || sb.visualPass === false || sb.sheetLeak === true;
+}
+
+function stillBadge(sb: {
+  stillQuality?: StillMeta["stillQuality"];
+  visualPass?: boolean;
+  sheetLeak?: boolean;
+}): string {
+  return stillQualityBadgeLabel({
+    stillQuality: sb.stillQuality,
+    visualPass: sb.visualPass,
+    sheetLeak: sb.sheetLeak,
+  } as StillMeta);
+}
 
 const props = defineProps<{
   mode: VideoMode;
@@ -281,7 +324,7 @@ function clearImage(index: number) {
   list[index] = { ...EMPTY_SLOT };
   imageList.value = list;
 }
-/** 分镜弹窗选中回调 */
+/** 分镜弹窗选中回调 — weak stills selectable but toast (BE burn still gates) */
 function pickStoryboard(sb: StoryboardItem) {
   storyboardDialogVisible.value = false;
   const fileType = "image";
@@ -293,7 +336,19 @@ function pickStoryboard(sb: StoryboardItem) {
     id: sb.id,
     prompt: sb.videoDesc ?? undefined,
     index: sb.index,
+    stillQuality: sb.stillQuality,
+    visualPass: sb.visualPass,
+    stateHint: sb.stateHint,
+    sheetLeak: sb.sheetLeak,
+    userMessage: sb.userMessage,
+    ctaLabel: sb.ctaLabel,
   } as UploadItem;
+
+  if (isWeakStill(sb)) {
+    window.$message?.warning?.(
+      String(sb.userMessage || sb.ctaLabel || "该分镜为弱图/未验收，不可作高质量视频首帧"),
+    );
+  }
 
   if (currentSlot === "start" || currentSlot === "end") {
     setFrameSlot(currentSlot, newItem);
@@ -351,6 +406,15 @@ function splitImage(index: number) {
     &:hover {
       border-color: var(--td-text-color);
       cursor: pointer;
+    }
+    .slotWeakTag {
+      position: absolute;
+      left: 4px;
+      bottom: 4px;
+      z-index: 4;
+      max-width: calc(100% - 8px);
+      pointer-events: none;
+      font-size: 10px;
     }
 
     .uploadPreview {
@@ -467,6 +531,14 @@ function splitImage(index: number) {
         width: 100%;
         text-align: center;
         border: 1px solid #ccc;
+      }
+      .weakStillTag {
+        position: absolute;
+        left: 6px;
+        bottom: 6px;
+        z-index: 2;
+        max-width: calc(100% - 12px);
+        pointer-events: none;
       }
     }
   }

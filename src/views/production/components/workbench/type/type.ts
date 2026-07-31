@@ -7,6 +7,13 @@ interface UploadItemBase {
   id: number | null;
   src?: string;
   prompt?: string;
+  /** Storyboard still quality — start-frame slot must not look HQ when weak */
+  stillQuality?: "missing" | "weak" | "hq_ok" | "stale_inherited";
+  visualPass?: boolean;
+  stateHint?: "weak_keep" | "ok" | string;
+  sheetLeak?: boolean;
+  userMessage?: string;
+  ctaLabel?: string;
 }
 
 interface UploadItemStoryboard extends UploadItemBase {
@@ -42,13 +49,22 @@ interface StoryboardItem {
   state?: string | null;
   trackId?: number | null;
   videoDesc?: string | null;
+  /** Keep/upload: state「已完成」≠ hq_ok — workbench first-frame picker */
+  stillQuality?: "missing" | "weak" | "hq_ok" | "stale_inherited";
+  visualPass?: boolean;
+  stateHint?: "weak_keep" | "ok" | string;
+  sheetLeak?: boolean;
+  ctaLabel?: string;
+  userMessage?: string;
 }
 
 interface TrackItem {
   id: number;
   prompt: string;
-  state: "未生成" | "生成中" | "已完成" | "生成失败";
+  /** 需完善 = prompt landed but burnAllowed false (≠ 已完成) */
+  state: "未生成" | "生成中" | "已完成" | "生成失败" | "需完善";
   reason?: string;
+  burnAllowed?: boolean;
   selectVideoId?: number | null;
   medias: TrackMedia[];
   videoList: VideoItem[];
@@ -68,6 +84,12 @@ interface TrackMediaBase {
   fileType: "image" | "video" | "audio";
   slotType?: Type; // 本地保存时记录的 slot 类型，用于切换轨道时精确还原位置
   index?: number;
+  stillQuality?: "missing" | "weak" | "hq_ok" | "stale_inherited";
+  visualPass?: boolean;
+  stateHint?: "weak_keep" | "ok" | string;
+  sheetLeak?: boolean;
+  userMessage?: string;
+  ctaLabel?: string;
 }
 
 interface TrackMediaStoryboard extends TrackMediaBase {

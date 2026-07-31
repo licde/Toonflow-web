@@ -42,9 +42,29 @@
       <div class="text w">
         <PromptEditor v-model="data.prompt" :references="references" :placeholder="$t('workbench.production.editImage.promptPlaceholder')" />
       </div>
-      <div v-if="gateMessage || promptUsedSummary" class="feedbackBox w">
+      <div v-if="gateMessage || promptUsedSummary || litDebtSlots.length" class="feedbackBox w">
         <t-alert :theme="stillQuality === 'hq_ok' ? 'success' : 'warning'" :message="gateMessage || '合成提示词已更新'" />
         <p v-if="promptUsedSummary" class="promptSummary">{{ promptUsedSummary }}</p>
+        <LitDetailDebtBar
+          v-if="stillQuality === 'weak' || sheetLeak || litDebtSlots.length"
+          :still-quality="stillQuality"
+          :still-meta="stillMetaSnapshot"
+          :missing-slots="litDebtSlots"
+          :primary-action="irdPrimaryAction || undefined"
+          :primary-next-step="primaryNextStep || undefined"
+          :cta-label="debtCtaLabel || undefined"
+          :explain="gateMessage || undefined"
+          :presentation-fork="presentationFork"
+          :design-debt-block="litDebtSlots.length > 0 && stillMetaSnapshot?.pendingHumanRejudge !== true"
+          :suggest-fill-enabled="true"
+          @hand-edit-vd="focusPromptForHandEdit"
+          @confirm-enhance="applyLitEnhance"
+          @suggest-fill="applyLitEnhance"
+          @confirm-split="applyLitSplit"
+          @presentation-fork="onPresentationFork"
+          @human-rejudge="applyHumanRejudge"
+          @batch-still="handleGenerate"
+        />
         <t-button
           v-if="composePreview?.ok && composePreview.prompt && composePreview.prompt !== data.prompt"
           size="small"
@@ -121,6 +141,9 @@ import openAssetsSelector from "@/utils/assetsCheck";
 import { useFileDialog } from "@vueuse/core";
 import projectStore from "@/stores/project";
 import { resolveGeneratePrompt } from "@/utils/resolveGeneratePrompt";
+import LitDetailDebtBar from "@/components/still/LitDetailDebtBar.vue";
+import { shouldBlockSilentStillRegen, type StillMeta } from "@/types/stillQuality";
+import { toastAfterApplyExitGate } from "@/utils/v5OpsHelpers";
 const { project } = storeToRefs(projectStore());
 const openStoryboardCheck = inject<() => Promise<Storyboard[]>>("openStoryboardCheck")!;
 const { open, onChange, onCancel } = useFileDialog({ multiple: false, reset: true, accept: ".png,.jpg,.jpeg" });
@@ -129,7 +152,14 @@ const selected = ref(true);
 const generating = ref(false);
 const previewing = ref(false);
 const stillQuality = ref<string | null>(null);
+const sheetLeak = ref(false);
 const gateMessage = ref("");
+const litDebtSlots = ref<string[]>([]);
+const irdPrimaryAction = ref<string | null>(null);
+const primaryNextStep = ref<string | null>(null);
+const debtCtaLabel = ref<string | null>(null);
+const presentationFork = ref<{ fork: string; label: string }[] | null>(null);
+const stillMetaSnapshot = ref<StillMeta | null>(null);
 const composePreview = ref<{
   ok?: boolean;
   prompt?: string;
@@ -245,6 +275,44 @@ function resolveStoryboardId(): number | undefined {
   return sid as number | undefined;
 }
 
+function ingestStillGateBody(body: Record<string, unknown> | null | undefined) {
+  if (!body) return;
+  stillQuality.value = (body.stillQuality as string) ?? null;
+  sheetLeak.value = Boolean(body.sheetLeak);
+  gateMessage.value = String(body.userMessage || (body.stillQuality === "hq_ok" ? "已标记高质量首帧" : ""));
+  litDebtSlots.value = Array.isArray(body.missingSlots) ? body.missingSlots.map(String) : [];
+  irdPrimaryAction.value = (body.irdPrimaryAction as string) ?? null;
+  primaryNextStep.value = (body.primaryNextStep as string) ?? null;
+  debtCtaLabel.value = (body.ctaLabel as string) ?? null;
+  presentationFork.value = Array.isArray(body.presentationFork)
+    ? (body.presentationFork as { fork: string; label: string }[])
+    : null;
+  const step = String(body.primaryNextStep ?? "");
+  const ird = String(body.irdPrimaryAction ?? "");
+  // Only hard-split latches; ignore stale BE blockSilentRegen for Key-optional / lit enhance
+  const hardSplit = step === "split_shot" || ird === "confirm_split";
+  stillMetaSnapshot.value = {
+    stillQuality: body.stillQuality as StillMeta["stillQuality"],
+    visualPass: body.visualPass as boolean | undefined,
+    sheetLeak: body.sheetLeak as boolean | undefined,
+    pendingHumanRejudge: body.pendingHumanRejudge as boolean | undefined,
+    primaryNextStep: body.primaryNextStep as string | undefined,
+    irdPrimaryAction: body.irdPrimaryAction as string | undefined,
+    missingSlots: litDebtSlots.value,
+    blockSilentRegen: hardSplit,
+    autoRepairStage: body.autoRepairStage as string | undefined,
+    autoRepairRound: body.autoRepairRound as number | undefined,
+    keepSoftEnvRef: body.keepSoftEnvRef as boolean | undefined,
+    bgMode: body.bgMode as StillMeta["bgMode"],
+    vlmError: body.vlmError as string | undefined,
+    keyOptional: body.keyOptional as boolean | undefined,
+    pixelDimStatus: body.pixelDimStatus as StillMeta["pixelDimStatus"],
+    ctaLabel: body.ctaLabel as string | undefined,
+    userMessage: body.userMessage as string | undefined,
+    i2vReady: body.i2vReady as boolean | undefined,
+  };
+}
+
 async function loadComposePreview(opts?: {
   autoApply?: boolean;
   mode?: "full" | "refine" | "fidelity";
@@ -316,6 +384,14 @@ async function handleGenerate(overridePrompt?: unknown) {
       promptText = composePreview.value.prompt;
     }
   }
+  if (shouldBlockSilentStillRegen(stillMetaSnapshot.value)) {
+    window.$message.warning(
+      gateMessage.value ||
+        debtCtaLabel.value ||
+        "须 Confirm / 手改 / 人审后再生成 — 禁止静默重抽",
+    );
+    return;
+  }
   generating.value = true;
   lastFeedback.value = null;
   gateMessage.value = "";
@@ -346,8 +422,7 @@ async function handleGenerate(overridePrompt?: unknown) {
         String(body.promptUsed).slice(0, 180) +
         (String(body.promptUsed).length > 180 ? "…" : "");
     }
-    stillQuality.value = body.stillQuality ?? null;
-    gateMessage.value = body.userMessage || (body.stillQuality === "hq_ok" ? "已标记高质量首帧" : "");
+    ingestStillGateBody(body);
     if (body.feedback) lastFeedback.value = body.feedback;
   } catch (e: any) {
     const payload = e?.response?.data?.data ?? e?.data ?? {};
@@ -356,10 +431,106 @@ async function handleGenerate(overridePrompt?: unknown) {
     const code = payload.code ? `[${payload.code}] ` : "";
     const cta = payload.ctaLabel ? ` → ${payload.ctaLabel}` : "";
     gateMessage.value = code + (payload.userMessage || e?.message || $t("workbench.production.editImage.generateFailed")) + cta;
-    stillQuality.value = payload.stillQuality ?? "missing";
+    ingestStillGateBody(payload);
     return window.$message.error(gateMessage.value);
   } finally {
     generating.value = false;
+  }
+}
+
+function focusPromptForHandEdit() {
+  window.$message.info(debtCtaLabel.value || "请在上方描写区手改画面落点后重生成");
+  selected.value = true;
+}
+
+async function applyLitEnhance() {
+  const pid = project.value?.id;
+  if (pid == null) {
+    window.$message?.warning?.("缺少项目 ID，请先手改描写");
+    return focusPromptForHandEdit();
+  }
+  try {
+    const data = await axios.post("/scriptAgent/stillIntentOps", {
+      projectId: pid,
+      action: "applyEnhance",
+      forceApply: true,
+      intentVisualEnhance: true,
+      literaryDetailLlmFill: true,
+      scriptId: episodesId.value,
+      shotIndex: typeof props.data?.shotIndex === "number" ? props.data.shotIndex : undefined,
+    });
+    const body = data?.data ?? data;
+    if (body?.ok) {
+      toastAfterApplyExitGate(body, body.a11yAnnounce || "已应用文学增强；请重出静照");
+      selected.value = true;
+    } else {
+      window.$message?.warning?.(
+        (body?.refused || []).join("; ") || body?.a11yAnnounce || "增强未全部通过，请手改 VD",
+      );
+      focusPromptForHandEdit();
+    }
+  } catch (e: any) {
+    window.$message?.error?.(e?.response?.data?.message || e?.message || "applyEnhance 失败");
+    focusPromptForHandEdit();
+  }
+}
+
+async function applyLitSplit() {
+  const pid = project.value?.id;
+  if (pid == null) {
+    window.$message?.warning?.("缺少项目 ID");
+    return;
+  }
+  try {
+    const data = await axios.post("/scriptAgent/stillIntentOps", {
+      projectId: pid,
+      action: "apply",
+      forceApply: true,
+      scriptId: episodesId.value,
+    });
+    const body = data?.data ?? data;
+    toastAfterApplyExitGate(body, body?.a11yAnnounce || "拆镜补丁已应用");
+    if (body?.designExitPass === false || body?.exitGate?.ok === false) {
+      primaryNextStep.value = "split_shot";
+    }
+  } catch (e: any) {
+    window.$message?.error?.(e?.response?.data?.message || e?.message || "stillIntentOps apply 失败");
+  }
+}
+
+async function onPresentationFork(fork: string) {
+  if (fork === "fork-A") {
+    focusPromptForHandEdit();
+    return;
+  }
+  await applyLitSplit();
+}
+
+async function applyHumanRejudge() {
+  const sid = resolveStoryboardId();
+  if (!sid) {
+    window.$message?.warning?.("须绑定分镜后再人审");
+    return;
+  }
+  try {
+    const data = await axios.post("/production/storyboard/humanRejudgeFidelity", {
+      storyboardId: sid,
+      modality: "still",
+      description: props.data.prompt,
+      items: [{ id: "human_delivery", pass: true, evidence: "operator_rejudge" }],
+    });
+    const body = data?.data ?? data;
+    if (body?.burnReady === false || body?.designDebtBlock) {
+      window.$message?.warning?.(
+        body?.userMessage || "设计债未清，人审不可标可燃片；请先 IRD/手改",
+      );
+      ingestStillGateBody(body);
+      return;
+    }
+    window.$message?.success?.(body?.userMessage || "人审通过（未测·非失败）");
+    ingestStillGateBody({ ...body, stillQuality: body?.stillQuality ?? "hq_ok", pendingHumanRejudge: false });
+  } catch (e: any) {
+    window.$message?.error?.(e?.response?.data?.message || e?.message || "人审失败");
   }
 }
 

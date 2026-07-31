@@ -45,6 +45,16 @@
                       <div class="imageToolsWrap show">
                         <ImageTools :style="{ transform: `scale(${styleMaxSize})` }" :src="item.src" position="br" />
                       </div>
+                      <t-tag
+                        v-if="isWeakKeepStill(item)"
+                        size="small"
+                        theme="warning"
+                        variant="light"
+                        class="frameWeakTag"
+                        :style="{ transform: `scale(${styleMaxSize})` }"
+                      >
+                        {{ stillFrameBadge(item) }}
+                      </t-tag>
                     </template>
                   </t-image>
                   <div v-else class="generatingPlaceholder" @click="editStoryboaryImage(item, [])">
@@ -138,6 +148,18 @@ import type { AssetItem, DeriveAsset, Storyboard } from "../utils/flowBuilder";
 import projectStore from "@/stores/project";
 import productionAgentStore from "@/stores/productionAgent";
 import { parsePromptRefs } from "@/utils/promptRefs";
+import { stillQualityBadgeLabel, type StillMeta } from "@/types/stillQuality";
+
+function isWeakKeepStill(item: Storyboard): boolean {
+  return item.stateHint === "weak_keep" || item.stillQuality === "weak" || item.visualPass === false;
+}
+
+function stillFrameBadge(item: Storyboard): string {
+  return stillQualityBadgeLabel({
+    stillQuality: item.stillQuality,
+    visualPass: item.visualPass,
+  } as StillMeta);
+}
 const { project } = storeToRefs(projectStore());
 const { episodesId } = storeToRefs(productionAgentStore());
 
@@ -435,6 +457,11 @@ async function save({ imageUrl, flowId }: { imageUrl: string; flowId: number }) 
       videoDesc: "",
       shouldGenerateImage: 1,
       state: "已完成",
+      // Insert keep has no L1 visualPass — do not present as burnable HQ
+      stillQuality: "weak",
+      visualPass: false,
+      stateHint: "weak_keep",
+      ctaLabel: "重新高质量生成",
     };
     const { data } = await axios.post("/production/storyboard/addStoryboard", {
       ...newFrame,
@@ -448,19 +475,33 @@ async function save({ imageUrl, flowId }: { imageUrl: string; flowId: number }) 
     return;
   }
 
-  // 更新模式：更新对应分镜的 src
+  // 更新模式：src 先写，质量态必须跟 BE（不可本地伪造 HQ）
   const target = storyboard.value.find((s) => s.id === id);
   if (target) {
     target.src = imageUrl;
     target.state = "已完成";
     target.flowId = flowId;
   }
-  await axios.post("/production/storyboard/updateStoryboardUrl", {
+  const res = await axios.post("/production/storyboard/updateStoryboardUrl", {
     id: id,
     url: imageUrl,
     flowId,
     qualityMode: "hq_update",
   });
+  const body = (res as { data?: Record<string, unknown> })?.data ?? (res as Record<string, unknown>);
+  if (target && body && typeof body === "object") {
+    if (body.stillQuality != null) target.stillQuality = body.stillQuality as Storyboard["stillQuality"];
+    if (body.visualPass != null) target.visualPass = Boolean(body.visualPass);
+    if (body.stateHint != null) target.stateHint = String(body.stateHint);
+    if (body.ctaLabel != null) target.ctaLabel = String(body.ctaLabel);
+    if (body.userMessage != null) target.userMessage = String(body.userMessage);
+    if (body.primaryNextStep != null) target.primaryNextStep = String(body.primaryNextStep);
+    if (body.stateHint === "weak_keep" || body.stillQuality === "weak") {
+      window.$message?.warning?.(
+        String(body.userMessage || body.ctaLabel || "外源/保留图未经验收，未标高质量"),
+      );
+    }
+  }
 }
 
 async function removeFn(id: number) {
@@ -751,6 +792,16 @@ function editInfo(item: Storyboard) {
     padding: 0 4px;
     line-height: 18px;
     border-radius: 3px;
+  }
+
+  .frameWeakTag {
+    position: absolute;
+    left: 6px;
+    bottom: 6px;
+    z-index: 4;
+    transform-origin: bottom left;
+    max-width: calc(100% - 12px);
+    pointer-events: none;
   }
 
   .frameTag {

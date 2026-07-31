@@ -35,6 +35,25 @@ export interface RePushPlanItem {
   status?: "pending" | "applied" | "in_progress" | "completed" | "exhausted";
 }
 
+/** W93 / IC-02 smart proposal — Confirm then apply via smartProposalOps */
+export interface SmartDesignProposal {
+  id?: string;
+  ruleId: string;
+  trigger: string;
+  proposal: string;
+  targetStage: string;
+  status: "pending_user_confirm" | "confirmed" | "rejected" | "applied";
+  shotIndex?: number;
+  confidence?: number;
+  presentationFork?: { fork: string; label: string }[];
+}
+
+export function forkLabel(fork: RePushPlanItem["presentationFork"] | string | null | undefined): string {
+  if (fork === "fork-A") return "改 W3 △ 叙事描述";
+  if (fork === "fork-B") return "改 SB spatialRelation 镜级";
+  return "";
+}
+
 export interface ClosureReport {
   missing?: string[];
   optimize?: string[];
@@ -109,6 +128,8 @@ export interface InspectBundleResult {
   };
   /** One-copy repair brief from exportGate / inspect */
   chatRepairText?: string;
+  /** W93 smart proposals (also pass as RulePanel prop) */
+  smartDesignProposals?: SmartDesignProposal[];
 }
 
 export type ClosureDimension = "dc" | "pc" | "gc" | "ic";

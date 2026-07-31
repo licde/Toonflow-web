@@ -16,9 +16,11 @@
             <t-button size="small" class="genTextbtn" :loading="currentTrack.state == '生成中'" @click="genText">
               {{ $t("workbench.generate.generateText") }}
             </t-button>
+            <t-tag v-if="currentTrack.state === '需完善'" size="small" theme="warning" variant="light" class="ml-5">需完善·不可烧</t-tag>
           </template>
           <IdentitySlotChips :slots="identitySlots" />
           <ShotSpecDrawer
+            ref="shotSpecDrawerRef"
             :project-id="project?.id"
             :script-id="episodesId"
             :storyboard-id="primaryStoryboardId"
@@ -28,6 +30,26 @@
             :audio="modelParmas.audio"
             :resolution="modelParmas.resolution"
             @identity="(slots) => (identitySlots = slots)"
+            @recompile-prompt="genText"
+          />
+          <VideoIntentDebtBar
+            v-if="burnVideoDebt"
+            :ok="burnVideoDebt.ok"
+            :primary-action="burnVideoDebt.primaryAction"
+            :primary-next-step="burnVideoDebt.primaryNextStep"
+            :missing-slots="burnVideoDebt.missingSlots"
+            :cta-label="burnVideoDebt.ctaLabel"
+            :findings="burnVideoDebt.findings"
+            :explain="burnVideoDebt.userMessage"
+            :diagnosing="burnVideoIrdLoading"
+            :applying="burnVideoIrdApplying"
+            :recompiling="currentTrack?.state == '生成中'"
+            @diagnose="diagnoseBurnVideoIrd"
+            @confirm-apply="applyBurnVideoIrd"
+            @hand-edit-vd="diagnoseBurnVideoIrd"
+            @recompile-prompt="genText"
+            @human-rejudge-video="applyVideoHumanRejudge"
+            @regen-prop-still="regenPropStillFromBurn"
           />
           <div v-if="lastRePushPlan.length" class="repushBar">
             <div v-for="(p, i) in lastRePushPlan" :key="i" class="repushItem">
@@ -79,13 +101,24 @@ import productionAgentStore from "@/stores/productionAgent";
 import { preflightProduction, preflightTouch } from "@/utils/ruleEngine";
 import IdentitySlotChips from "./components/IdentitySlotChips.vue";
 import ShotSpecDrawer from "./components/ShotSpecDrawer.vue";
+import VideoIntentDebtBar from "@/components/video/VideoIntentDebtBar.vue";
+import type { VideoIrdDiagnoseResponse } from "@/types/videoIntentOps";
+import { isVideoIrdDebtMeta, videoIrdCtaLabel } from "@/types/videoIntentOps";
 import { useAdaptationNav } from "@/composables/useAdaptationNav";
+import { toastAfterApplyExitGate, designExitStillOpen } from "@/utils/v5OpsHelpers";
 
 const { goDesignStage } = useAdaptationNav();
 const { project } = storeToRefs(projectStore());
 const { flowData } = storeToRefs(productionAgentStore());
 const episodesId = inject<Ref<number>>("episodesId")!;
 const activeTrackIndex = ref(0);
+const shotSpecDrawerRef = ref<{
+  openVideoIntentOps?: () => Promise<void>;
+  clearVideoIrd?: () => void;
+} | null>(null);
+const burnVideoDebt = ref<VideoIrdDiagnoseResponse | null>(null);
+const burnVideoIrdLoading = ref(false);
+const burnVideoIrdApplying = ref(false);
 const cacheStore = imageListCacheStore();
 const { getCache, setCache, removeCache, initCacheFromTrackList, warmUpUrls, resolveUrls, resolveUrlSync } = cacheStore;
 const { urlMap } = storeToRefs(cacheStore);
@@ -114,6 +147,144 @@ const storyboardList = ref<StoryboardItem[]>([]); // 分镜列表
 const promptByMode = ref<Record<string, Record<string, string>>>({});
 const identitySlots = ref<{ kind: string; code: string }[]>([]);
 const lastRePushPlan = ref<{ trigger: string; reverseTarget: string; forwardRerun?: string[] }[]>([]);
+
+function captureBurnVideoDebt(details: Record<string, unknown> | null | undefined) {
+  if (!details) return;
+  const code = String(details.code ?? details.blockCode ?? "");
+  const trigger = String(details.reverseTrigger ?? "");
+  const step = String(details.primaryNextStep ?? details.nextStep ?? "");
+  const msg = String(details.userMessage ?? details.message ?? "");
+  const cta = String(details.ctaLabel ?? "");
+  const stale = /VIDEO-PROMPT-STALE|video_prompt_stale/i.test(`${code} ${trigger} ${msg} ${cta}`);
+  const looksVid =
+    stale ||
+    /DEX-VID|DUR-PAD|VP-THIN|vid_|PROMPT-FIDELITY/i.test(code) ||
+    /vid_|video_prompt|cam_mediate|prompt_fidelity/i.test(trigger) ||
+    (step === "chat_repair" && /视频|运镜|伪台词|口型|beatDuration|DEX-VID|重编译|过期/i.test(`${msg}${cta}`)) ||
+    step === "human_review";
+  if (!looksVid) return;
+  burnVideoDebt.value = {
+    ok: false,
+    findings: Array.isArray(details.findings)
+      ? (details.findings as VideoIrdDiagnoseResponse["findings"])
+      : [
+          {
+            id: code || (stale ? "VIDEO-PROMPT-STALE" : "DEX-VID"),
+            severity: "BLOCK",
+            message: msg || cta || (stale ? "设计/对白已变，须重编译视频提示词" : "视频设计债"),
+          },
+        ],
+    primaryAction:
+      (details.primaryAction as VideoIrdDiagnoseResponse["primaryAction"]) ||
+      (stale ? "none" : /cam|mediate/i.test(trigger + code) ? "confirm_cam_mediate" : "confirm_enhance"),
+    confirmRequired: !stale,
+    missingSlots: Array.isArray(details.missingSlots) ? (details.missingSlots as string[]) : [],
+    ctaLabel:
+      cta ||
+      videoIrdCtaLabel({
+        primaryNextStep: step,
+        primaryAction: stale ? "none" : "confirm_enhance",
+        reverseTrigger: trigger,
+        code,
+      }),
+    primaryNextStep: (step as VideoIrdDiagnoseResponse["primaryNextStep"]) || "chat_repair",
+    userMessage: msg || undefined,
+  };
+}
+
+async function diagnoseBurnVideoIrd() {
+  const pid = project.value?.id;
+  if (pid == null) {
+    window.$message?.warning?.("缺少项目 ID");
+    return;
+  }
+  burnVideoIrdLoading.value = true;
+  try {
+    const { data } = await axios.post("/scriptAgent/videoIntentOps", {
+      projectId: pid,
+      action: "diagnose",
+    });
+    const body = (data?.data ?? data) as VideoIrdDiagnoseResponse;
+    burnVideoDebt.value = isVideoIrdDebtMeta(body) || body.ok === false ? body : null;
+    if (body?.ok) window.$message?.success?.(body.userMessage || "视频设计契约已过");
+    else window.$message?.info?.(body?.ctaLabel || "视频设计债须 Confirm");
+  } catch (e: any) {
+    window.$message?.error?.(e?.response?.data?.message || e?.message || "videoIntentOps 失败");
+  } finally {
+    burnVideoIrdLoading.value = false;
+  }
+}
+
+async function applyBurnVideoIrd() {
+  const pid = project.value?.id;
+  if (pid == null) {
+    window.$message?.warning?.("缺少项目 ID");
+    return;
+  }
+  burnVideoIrdApplying.value = true;
+  try {
+    const data = await axios.post("/scriptAgent/videoIntentOps", {
+      projectId: pid,
+      action: "apply",
+      forceApply: true,
+    });
+    const body = (data?.data ?? data) as Record<string, unknown>;
+    const again = (body.after ?? body) as VideoIrdDiagnoseResponse | null;
+    burnVideoDebt.value = isVideoIrdDebtMeta(again ?? {}) || again?.ok === false ? again : null;
+    toastAfterApplyExitGate(body, again?.userMessage || "视频设计债已清");
+    if (designExitStillOpen(body)) {
+      await diagnoseBurnVideoIrd();
+    } else if (again?.ok) {
+      burnVideoDebt.value = null;
+    }
+  } catch (e: any) {
+    window.$message?.error?.(e?.response?.data?.message || e?.message || "videoIntentOps apply 失败");
+  } finally {
+    burnVideoIrdApplying.value = false;
+  }
+}
+
+async function applyVideoHumanRejudge() {
+  const sid = primaryStoryboardId.value;
+  const track = currentTrack.value;
+  if (!sid || !track?.id) {
+    window.$message?.warning?.("须绑定分镜轨道后再人审");
+    return;
+  }
+  const latestVideo = track.videoList?.[track.videoList.length - 1];
+  try {
+    const data = await axios.post("/production/storyboard/humanRejudgeFidelity", {
+      storyboardId: sid,
+      modality: "video",
+      trackId: track.id,
+      videoId: latestVideo?.id,
+      items: [{ id: "svq_unmeasured", pass: true, evidence: "operator_video_rejudge" }],
+    });
+    const body = data?.data ?? data;
+    if (body?.videoPass === false) {
+      window.$message?.warning?.(body?.userMessage || "成片人审未全过");
+      return;
+    }
+    window.$message?.success?.(body?.userMessage || "成片人审通过（未测·可交付）");
+    burnVideoDebt.value = null;
+  } catch (e: any) {
+    window.$message?.error?.(e?.response?.data?.message || e?.message || "成片人审失败");
+  }
+}
+
+async function regenPropStillFromBurn() {
+  const sid = primaryStoryboardId.value;
+  if (!sid) {
+    window.$message?.warning?.("须绑定分镜");
+    return;
+  }
+  try {
+    await productionAgentStore().batchGenerateStoryboard([sid], true);
+    window.$message.info("已排队重出带道具静照");
+  } catch (e: any) {
+    window.$message?.error?.(e?.response?.data?.data?.userMessage || e?.message || "重出静照失败");
+  }
+}
 
 const primaryStoryboardId = computed(() => {
   const sb = imageList.value.find((i) => i.sources === "storyboard" && typeof i.id === "number");
@@ -435,11 +606,33 @@ async function getGenerateData() {
 
   modelParmas.value.duration = clampDuration(data.trackList?.[activeTrackIndex.value]?.duration);
 }
-/** 提示词失焦时保存到后端 */
-function handlePromptBlur() {
+/** 提示词失焦时保存到后端 — honor re-decide state (≠ keep prior 已完成) */
+async function handlePromptBlur() {
   const trackId = trackList.value[activeTrackIndex.value]?.id;
   if (trackId == null) return;
-  axios.post("/production/workbench/updateVideoPrompt", { id: trackId, prompt: currentTrack.value?.prompt });
+  try {
+    const res = await axios.post("/production/workbench/updateVideoPrompt", {
+      id: trackId,
+      prompt: currentTrack.value?.prompt,
+    });
+    const body = (res as { data?: Record<string, unknown> })?.data ?? (res as Record<string, unknown>);
+    const track = currentTrack.value;
+    if (track && body && typeof body === "object") {
+      if (typeof body.state === "string" && body.state) {
+        track.state = body.state as TrackItem["state"];
+      }
+      if (typeof body.burnAllowed === "boolean") {
+        track.burnAllowed = body.burnAllowed;
+      }
+      if (body.state === "需完善" || body.burnAllowed === false) {
+        window.$message?.warning?.(
+          String(body.userMessage || "手改提示词未达烧片标准（需完善），请完善后重编译"),
+        );
+      }
+    }
+  } catch (e: any) {
+    window.$message?.error?.(e?.message || "保存提示词失败");
+  }
 }
 
 /** 单个轨道生成提示词 — 一次填满 promptByMode 矩阵 */
@@ -507,6 +700,14 @@ async function genText() {
             ? data
             : "";
     track.prompt = promptText;
+    // M7: recompile cleared VIDEO-PROMPT-STALE debt when new prompt landed
+    if (
+      promptText &&
+      burnVideoDebt.value?.findings?.some((f) => /VIDEO-PROMPT-STALE/i.test(String(f.id ?? "")))
+    ) {
+      burnVideoDebt.value = null;
+    }
+    shotSpecDrawerRef.value?.clearVideoIrd?.();
     if (Array.isArray(payload?.identity)) {
       identitySlots.value = payload.identity;
     } else {
@@ -553,10 +754,29 @@ async function genText() {
       track.prompt = matrixCur;
     }
     if (!payload?.identity) identitySlots.value = parseIdentitySlots(track.prompt);
-    track.state = "已完成";
+    // BE may persist prompt with burnAllowed=false + state=需完善 — never forge 已完成
+    if (payload?.burnAllowed === false) {
+      track.state = "需完善";
+    } else if (typeof payload?.state === "string" && payload.state) {
+      track.state = payload.state as TrackItem["state"];
+    } else {
+      track.state = "已完成";
+    }
   } catch (e: any) {
     track.state = "生成失败";
-    const plan = e?.response?.data?.data?.rePushPlan ?? e?.data?.rePushPlan ?? e?.rePushPlan;
+    const details = e?.response?.data?.data ?? e?.data ?? e;
+    captureBurnVideoDebt({
+      ...(typeof details === "object" && details ? details : {}),
+      code: details?.code,
+      reverseTrigger: details?.reverseTrigger,
+      primaryNextStep: details?.primaryNextStep ?? details?.nextStep,
+      ctaLabel: details?.ctaLabel,
+      userMessage: details?.userMessage || details?.message,
+      findings: details?.findings,
+      missingSlots: details?.missingSlots,
+      primaryAction: details?.primaryAction,
+    });
+    const plan = details?.rePushPlan ?? e?.response?.data?.data?.rePushPlan ?? e?.data?.rePushPlan ?? e?.rePushPlan;
     if (Array.isArray(plan) && plan.length) {
       lastRePushPlan.value = plan;
       window.$message.error(`提示词失败 · ${plan[0].trigger}→${plan[0].reverseTarget}`);
@@ -649,6 +869,10 @@ onMounted(() => {
 /** 单个轨道生成视频 */
 async function generateVideo() {
   if (!(await runPreflight())) return;
+  if (currentTrack.value?.state === "需完善" || currentTrack.value?.burnAllowed === false) {
+    window.$message.warning("提示词未达烧片标准（需完善），请先重编译或按清单修复后再烧");
+    return;
+  }
   const dlg = DialogPlugin.confirm({
     header: $t("workbench.generate.generateConfirm"),
     body: $t("workbench.generate.generateConfirmBody"),
@@ -684,6 +908,7 @@ async function generateVideo() {
           trackId: currentTrack.value.id,
         });
         window.$message.success($t("workbench.generate.generateStarted"));
+        burnVideoDebt.value = null;
         currentTrack.value.videoList.push({
           id: data,
           state: "生成中",
@@ -702,6 +927,17 @@ async function generateVideo() {
             : typeof details?.exportGate?.chatRepairText === "string"
               ? details.exportGate.chatRepairText
               : "";
+        captureBurnVideoDebt({
+          ...(typeof details === "object" && details ? details : {}),
+          code: details?.code ?? qd?.code,
+          reverseTrigger: details?.reverseTrigger ?? qd?.reverseTrigger,
+          primaryNextStep: details?.primaryNextStep ?? details?.nextStep ?? qd?.nextStep,
+          ctaLabel: cta,
+          userMessage: um,
+          findings: details?.findings,
+          missingSlots: details?.missingSlots,
+          primaryAction: details?.primaryAction,
+        });
         // Prefer actionable CTA over blank soft_patch copy
         if (um && (suggested != null || cta)) {
           if (crt.trim()) {
@@ -771,17 +1007,52 @@ async function getVideoList() {
     });
     videoPollFails = 0;
     if (data && data.length) {
-      data.forEach((item: { id: number; state: "生成中" | "未生成" | "已完成" | "生成失败"; src?: string; errorReason?: string }) => {
-        for (const track of trackList.value) {
-          const findData = track.videoList.find((i) => i.id == item.id);
-          if (findData) {
-            findData.state = item.state;
-            findData.src = item?.src ?? "";
-            findData.errorReason = item?.errorReason ?? "";
-            break;
+      data.forEach(
+        (item: {
+          id: number;
+          state: "生成中" | "未生成" | "已完成" | "生成失败";
+          src?: string;
+          errorReason?: string;
+          primaryNextStep?: string;
+          userMessage?: string;
+          ctaLabel?: string;
+          message?: string;
+          code?: string;
+          findings?: unknown;
+          missingSlots?: string[];
+          primaryAction?: string;
+          unknownDims?: string[];
+          notify?: boolean;
+        }) => {
+          for (const track of trackList.value) {
+            const findData = track.videoList.find((i) => i.id == item.id);
+            if (findData) {
+              const prev = findData.state;
+              findData.state = item.state;
+              findData.src = item?.src ?? "";
+              findData.errorReason = item?.errorReason ?? "";
+              if (item.state === "生成失败" && prev !== "生成失败") {
+                if (item.primaryNextStep || item.userMessage || item.code || item.ctaLabel) {
+                  captureBurnVideoDebt({
+                    code: item.code,
+                    primaryNextStep: item.primaryNextStep,
+                    userMessage: item.userMessage || item.message,
+                    ctaLabel: item.ctaLabel,
+                    findings: item.findings,
+                    missingSlots: item.missingSlots,
+                    primaryAction: item.primaryAction,
+                    unknownDims: item.unknownDims,
+                  });
+                } else {
+                  ingestVideoErrorReason(item.errorReason);
+                }
+              }
+              if (item.state === "已完成") burnVideoDebt.value = null;
+              break;
+            }
           }
-        }
-      });
+        },
+      );
     }
   } catch {
     videoPollFails++;
@@ -789,6 +1060,52 @@ async function getVideoList() {
       stopPoll();
       window.$message?.warning?.($t("workbench.generate.pollingFailed"));
     }
+  }
+}
+
+/** Parse o_video.errorReason JSON → VIRD / human_review bar when applicable. */
+function ingestVideoErrorReason(raw?: string | null) {
+  if (!raw) return;
+  let parsed: Record<string, unknown> | null = null;
+  try {
+    parsed = typeof raw === "string" && raw.trim().startsWith("{") ? (JSON.parse(raw) as Record<string, unknown>) : null;
+  } catch {
+    parsed = null;
+  }
+  if (parsed) {
+    const pb = (parsed.postBurn as Record<string, unknown> | undefined) ?? undefined;
+    const flat = {
+      ...parsed,
+      ...(pb ?? {}),
+      code: parsed.code ?? pb?.code,
+      reverseTrigger: parsed.reverseTrigger,
+      primaryNextStep: parsed.primaryNextStep ?? pb?.primaryNextStep ?? parsed.nextStep,
+      ctaLabel: parsed.ctaLabel,
+      userMessage: parsed.userMessage || pb?.userMessage || parsed.message,
+      findings: parsed.findings || pb?.findings,
+      missingSlots: parsed.missingSlots,
+      primaryAction: parsed.primaryAction,
+      unknownDims: parsed.unknownDims || pb?.unknownDims,
+    };
+    captureBurnVideoDebt(flat);
+    const um = String(flat.userMessage || "");
+    const cta = String(flat.ctaLabel || "");
+    if (um || cta) {
+      window.$message?.error?.(`${um}${cta ? ` · ${cta}` : ""}`);
+    }
+  } else if (/DEX-VID|视频设计|伪台词|运镜|human_review|SVQ|VIDEO-PROMPT-STALE|重编译|提示词.*过期/i.test(raw)) {
+    const stale = /VIDEO-PROMPT-STALE|video_prompt_stale|重编译|提示词.*过期/i.test(raw);
+    captureBurnVideoDebt({
+      code: stale ? "VIDEO-PROMPT-STALE" : "DEX-VID",
+      reverseTrigger: stale ? "video_prompt_stale" : undefined,
+      primaryNextStep: /human_review|SVQ/i.test(raw) ? "human_review" : "chat_repair",
+      userMessage: raw,
+      ctaLabel: /human_review|SVQ/i.test(raw)
+        ? "SVQ 未测维 · 人审"
+        : stale
+          ? "重编译视频提示词"
+          : "诊断视频 IRD",
+    });
   }
 }
 function startPromptPoll() {
@@ -812,14 +1129,23 @@ async function getTrackPromptList() {
     });
     promptPollFails = 0;
     if (data && data.length) {
-      data.forEach((item: { id: number; state: "生成中" | "未生成" | "已完成" | "生成失败"; prompt?: string; reason?: string }) => {
+      data.forEach((item: {
+        id: number;
+        state: "生成中" | "未生成" | "已完成" | "生成失败" | "需完善";
+        prompt?: string;
+        reason?: string;
+        burnAllowed?: boolean;
+      }) => {
         const findData = trackList.value.find((t) => t.id == item.id);
         if (findData) {
           findData.state = item.state;
           findData.prompt = item?.prompt ?? "";
           findData.reason = item?.reason ?? "";
           if (item.state === "生成失败") {
+            ingestVideoErrorReason(item.reason);
             window.$message.error(`提示词生成失败，${item.reason ?? "未知原因"}`);
+          } else if (item.state === "需完善" || item.burnAllowed === false) {
+            window.$message.warning("提示词已落库但不可烧片（需完善），请按清单修复后重编译");
           }
         }
       });

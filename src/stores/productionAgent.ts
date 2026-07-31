@@ -405,13 +405,31 @@ function makeProductionAgentStore(projectId: string) {
           ids: ids,
         });
         if (!data || data.length === 0) return;
-        const records = data as Array<{ id: number; state: string; src?: string; reason?: string }>;
+        const records = data as Array<{
+          id: number;
+          state: string;
+          src?: string;
+          reason?: string;
+          stillQuality?: string;
+          visualPass?: boolean;
+          stateHint?: string;
+          ctaLabel?: string;
+          userMessage?: string;
+          primaryNextStep?: string;
+          sheetLeak?: boolean;
+        }>;
         records.forEach((record) => {
           const item = flowData.value.storyboard.find((s) => s.id === record.id);
           if (item) {
             item.state = record.state as "未生成" | "生成中" | "已完成" | "生成失败";
             if (record.src) item.src = record.src;
             item.reason = record?.reason ?? "";
+            if (record.stillQuality != null) item.stillQuality = record.stillQuality as typeof item.stillQuality;
+            if (record.visualPass != null) item.visualPass = record.visualPass;
+            if (record.stateHint != null) item.stateHint = record.stateHint;
+            if (record.ctaLabel != null) item.ctaLabel = record.ctaLabel;
+            if (record.userMessage != null) item.userMessage = record.userMessage;
+            if (record.primaryNextStep != null) item.primaryNextStep = record.primaryNextStep;
           }
         });
       } catch (e) {

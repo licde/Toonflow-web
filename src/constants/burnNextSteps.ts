@@ -10,6 +10,7 @@ export const BURN_NEXT_STEPS = [
   "burn",
   "raise_duration",
   "regen_storyboard_hq",
+  "human_review",
 ] as const;
 
 export type BurnNextStep = (typeof BURN_NEXT_STEPS)[number];

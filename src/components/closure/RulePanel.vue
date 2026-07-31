@@ -6,8 +6,9 @@ import type {
   InspectBundleResult,
   RepairHint,
   RePushPlanItem,
+  SmartDesignProposal,
 } from "@/types/closure";
-import { CLOSURE_DIMENSION_LABELS } from "@/types/closure";
+import { CLOSURE_DIMENSION_LABELS, forkLabel as forkLabelText } from "@/types/closure";
 
 const props = defineProps<{
   result: InspectBundleResult | null;
@@ -22,18 +23,79 @@ const props = defineProps<{
   ctaLabel?: string;
   primaryNextStep?: string;
   healLog?: { at: string; ruleId: string; action: string; detail?: string }[];
+  /** IC-02 / W93 smart proposals awaiting Confirm */
+  smartDesignProposals?: SmartDesignProposal[] | null;
 }>();
 
 const emit = defineEmits<{
   copyChat: [text: string];
   copyAllChat: [text: string];
   rePush: [item: RePushPlanItem];
+  applyDc01SoftPatch: [];
+  applyEmotionStructureHeal: [];
+  confirmSmartProposal: [payload: { proposalId: string; fork?: string }];
+  rejectSmartProposal: [payload: { proposalId: string }];
+  applySmartProposals: [];
+  presentationFork: [payload: { proposalId: string; fork: string }];
 }>();
 
 const activeTab = ref<ClosureDimension>("dc");
 const copyFlash = ref(false);
 
 const dimensions: ClosureDimension[] = ["dc", "pc", "gc", "ic"];
+
+const showDc01SoftPatchCta = computed(() => {
+  const plan = props.result?.rePushPlan ?? [];
+  return plan.some(
+    (p) =>
+      p.trigger === "dialogue_hash_mismatch" ||
+      /dialogue_hash_mismatch/i.test(String(p.trigger || p.reason || "")),
+  );
+});
+
+const showEmotionStructureHealCta = computed(() => {
+  const plan = props.result?.rePushPlan ?? [];
+  return plan.some((p) => {
+    const t = String(p.trigger || p.reason || "");
+    return (
+      /emotion_structure|cam_style|cluster|structure_stale|svq_|motion_mismatch/i.test(t) ||
+      (p.reverseTarget === "EN" && /CAM|PR-CAM|structure/i.test(t))
+    );
+  });
+});
+
+const pendingProposals = computed(() => {
+  const fromProp = props.smartDesignProposals ?? [];
+  const fromResult = (props.result as InspectBundleResult & { smartDesignProposals?: SmartDesignProposal[] } | null)
+    ?.smartDesignProposals ?? [];
+  const list = fromProp.length ? fromProp : fromResult;
+  return list.filter((p) => p.status === "pending_user_confirm" || p.status === "confirmed");
+});
+
+const confirmedCount = computed(
+  () => pendingProposals.value.filter((p) => p.status === "confirmed").length,
+);
+
+function rePushLabel(p: RePushPlanItem): string {
+  const trigger = String(p.trigger || p.reason || "");
+  if (trigger === "runtime_type_error" || /is not a function|TypeError/i.test(trigger)) {
+    return "运行时异常 → 重试生成（非台词保真）";
+  }
+  if (trigger === "dialogue_hash_mismatch" || /dialogue_hash_mismatch/i.test(trigger)) {
+    return "分镜台词与剧本对不上 → 补台词后再生成";
+  }
+  if (/emotion_structure|structure_stale|cam_style|cluster/i.test(trigger)) {
+    return "情绪结构待补齐 → 按当前风格自愈（不改台词）";
+  }
+  if (p.reverseTarget === "INFRA") {
+    return trigger ? `${trigger} → 检查环境后重试` : "基础设施异常 → 重试";
+  }
+  if (p.reverseTarget === "SB" && /CAM|structure|emotion/i.test(trigger)) {
+    return "分镜结构问题 → 一键按当前情绪风格补齐";
+  }
+  const target = p.reverseTarget ? ` → ${p.reverseTarget}` : "";
+  return `${trigger || "回推"}${target}`;
+}
 
 /** SSOT: exportAllowed=false wins over soft inspect.blocked / WARN counts */
 const isBlocked = computed(() => {
@@ -96,9 +158,7 @@ function checkClass(c: ClosureCheck): string {
 }
 
 function forkLabel(fork: RePushPlanItem["presentationFork"]): string {
-  if (fork === "fork-A") return "改剧本";
-  if (fork === "fork-B") return "改分镜";
-  return "";
+  return forkLabelText(fork);
 }
 
 function onCopy(h: RepairHint) {
@@ -285,6 +345,68 @@ function onCopyFullBrief() {
       </div>
     </section>
 
+    <section v-if="showDc01SoftPatchCta" class="rule-panel__section">
+      <h4>台词覆盖</h4>
+      <p class="rule-panel__dc01-msg">分镜台词与剧本对不上，可一键把缺失台词补进空镜后再生成。</p>
+      <button type="button" class="rule-panel__copy-primary" @click="emit('applyDc01SoftPatch')">
+        一键补台词
+      </button>
+    </section>
+
+    <section v-if="showEmotionStructureHealCta" class="rule-panel__section">
+      <h4>情绪结构</h4>
+      <p class="rule-panel__dc01-msg">只更新情绪契约与分镜结构，不修改台词原文。设计期应已出站；此处为漏网兜底。</p>
+      <button type="button" class="rule-panel__copy-primary" @click="emit('applyEmotionStructureHeal')">
+        按当前题材公式补齐结构
+      </button>
+    </section>
+
+    <section v-if="pendingProposals.length" class="rule-panel__section">
+      <h4>智能提案 Confirm（W93）</h4>
+      <p class="rule-panel__dc01-msg">须先确认路径，再一键 apply 写库；未 Confirm 禁止假绿出站。</p>
+      <div v-for="sp in pendingProposals" :key="sp.id || sp.ruleId" class="rule-panel__repush">
+        <div>
+          <strong>{{ sp.ruleId }}</strong>
+          <span> · {{ sp.proposal }}</span>
+          <span class="rule-panel__fork">{{ sp.status }} → {{ sp.targetStage }}</span>
+        </div>
+        <div v-if="sp.presentationFork?.length" class="rule-panel__fork-row">
+          <button
+            v-for="f in sp.presentationFork"
+            :key="f.fork"
+            type="button"
+            class="rule-panel__copy-primary"
+            @click="
+              emit('presentationFork', { proposalId: sp.id || sp.ruleId, fork: f.fork });
+              emit('confirmSmartProposal', { proposalId: sp.id || sp.ruleId, fork: f.fork });
+            "
+          >
+            {{ f.label }}
+          </button>
+        </div>
+        <div v-else class="rule-panel__fork-row">
+          <button
+            type="button"
+            class="rule-panel__copy-primary"
+            @click="emit('confirmSmartProposal', { proposalId: sp.id || sp.ruleId })"
+          >
+            Confirm
+          </button>
+          <button type="button" @click="emit('rejectSmartProposal', { proposalId: sp.id || sp.ruleId })">
+            拒绝
+          </button>
+        </div>
+      </div>
+      <button
+        v-if="confirmedCount"
+        type="button"
+        class="rule-panel__copy-primary"
+        @click="emit('applySmartProposals')"
+      >
+        Apply 已确认提案写库（{{ confirmedCount }}）
+      </button>
+    </section>
+
     <section v-if="chatMustHints.length || (isBlocked && allChatText.trim())" class="rule-panel__section">
       <div class="rule-panel__section-header">
         <h4>需 Chat 修改</h4>
@@ -302,7 +424,7 @@ function onCopyFullBrief() {
     <section v-if="result.rePushPlan?.length" class="rule-panel__section">
       <h4>回推计划</h4>
       <div v-for="(p, i) in result.rePushPlan" :key="i" class="rule-panel__repush">
-        <span>{{ p.trigger || p.reason }} → {{ p.reverseTarget }}</span>
+        <span>{{ rePushLabel(p) }}</span>
         <span v-if="p.presentationFork" class="rule-panel__fork">{{ forkLabel(p.presentationFork) }}</span>
         <button type="button" @click="emit('rePush', p)">回推 {{ p.reverseTarget }}（仅跳转，未改数据）</button>
       </div>
@@ -423,5 +545,16 @@ function onCopyFullBrief() {
   margin-left: 8px;
   color: #722ed1;
   font-size: 12px;
+}
+.rule-panel__fork-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.rule-panel__dc01-msg {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: #666;
 }
 </style>

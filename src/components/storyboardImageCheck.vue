@@ -46,6 +46,15 @@
                     <template #trigger="{ open }">
                       <div class="mediaTrigger" @click="row.src && open()">
                         <img :src="row.src" :alt="row.name" />
+                        <t-tag
+                          v-if="isWeakStillRow(row)"
+                          size="small"
+                          theme="warning"
+                          variant="light"
+                          class="weakStillTag"
+                        >
+                          {{ stillRowBadge(row) }}
+                        </t-tag>
                         <div class="mediaHoverOverlay">
                           <t-icon name="browse" size="20px" />
                           <span class="hoverText">{{ $t("components.storyboardImageCheck.preview") }}</span>
@@ -54,6 +63,12 @@
                     </template>
                   </t-image-viewer>
                 </div>
+              </template>
+              <template #quality="{ row }">
+                <t-tag v-if="row.stillQuality || row.stateHint" size="small" :theme="isWeakStillRow(row) ? 'warning' : 'success'" variant="light">
+                  {{ stillRowBadge(row) }}
+                </t-tag>
+                <span v-else>—</span>
               </template>
               <template #startTime="{ row }">
                 <span>{{ dayjs(row.startTime).format("YYYY-MM-DD HH:mm:ss") }}</span>
@@ -71,6 +86,19 @@ import dayjs from "dayjs";
 import axios from "@/utils/axios";
 import type { TableProps } from "tdesign-vue-next";
 import type { Storyboard } from "@/views/production/utils/flowBuilder";
+import { stillQualityBadgeLabel, type StillMeta } from "@/types/stillQuality";
+
+function isWeakStillRow(row: Storyboard): boolean {
+  return row.stateHint === "weak_keep" || row.stillQuality === "weak" || row.visualPass === false;
+}
+
+function stillRowBadge(row: Storyboard): string {
+  return stillQualityBadgeLabel({
+    stillQuality: row.stillQuality,
+    visualPass: row.visualPass,
+    sheetLeak: (row as { sheetLeak?: boolean }).sheetLeak,
+  } as StillMeta);
+}
 const props = withDefaults(
   defineProps<{
     /** 限制显示的资产类型 */
@@ -151,6 +179,13 @@ const clipColumns: TableProps["columns"] = [
     cell: "preview",
   },
   {
+    colKey: "quality",
+    title: "质量",
+    width: 120,
+    align: "center",
+    cell: "quality",
+  },
+  {
     colKey: "prompt",
     title: $t("workbench.project.dialog.prompt.title"),
     width: 100,
@@ -225,6 +260,12 @@ function handlePageChange(pageInfo: { current: number; pageSize: number }) {
 // 确认选择
 function handleConfirm() {
   const rows = tableData.value.filter((row) => selectedRowKeys.value.includes(row.id!));
+  const weak = rows.filter((r) => isWeakStillRow(r));
+  if (weak.length) {
+    window.$message?.warning?.(
+      `已选 ${weak.length} 张弱图/未验收静照（不可作视频首帧 HQ），请知悉`,
+    );
+  }
   emit("confirm", rows);
   dialogVisible.value = false;
 }
@@ -361,6 +402,15 @@ function handleClose() {
             width: 100%;
             height: 100%;
             object-fit: cover;
+          }
+          .weakStillTag {
+            position: absolute;
+            left: 2px;
+            bottom: 2px;
+            z-index: 2;
+            max-width: calc(100% - 4px);
+            pointer-events: none;
+            font-size: 10px;
           }
           &.videoThumb {
             background: var(--td-bg-color-component);

@@ -57,6 +57,13 @@ export interface Storyboard {
   reason?: string;
   videoDesc: string;
   shouldGenerateImage: number;
+  /** Keep/upload: state「已完成」≠ hq_ok — honor BE stillQuality / stateHint */
+  stillQuality?: "missing" | "weak" | "hq_ok" | "stale_inherited";
+  visualPass?: boolean;
+  stateHint?: "weak_keep" | "ok" | string;
+  ctaLabel?: string;
+  userMessage?: string;
+  primaryNextStep?: string;
 }
 
 interface VideoList {

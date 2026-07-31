@@ -84,10 +84,15 @@
         :cta-label="healPrimary?.ctaLabel"
         :primary-next-step="healPrimary?.primaryNextStep"
         :heal-log="healLog"
+        :smart-design-proposals="smartDesignProposals"
         class="closurePreview"
         @re-push="onRePush"
         @copy-chat="onCopyChat"
-        @copy-all-chat="onCopyAllChat" />
+        @copy-all-chat="onCopyAllChat"
+        @confirm-smart-proposal="onConfirmSmartProposal"
+        @reject-smart-proposal="onRejectSmartProposal"
+        @apply-smart-proposals="onApplySmartProposals"
+        @presentation-fork="onPresentationFork" />
     </div>
   </t-dialog>
 </template>
@@ -98,9 +103,11 @@ import type { UploadFile } from "tdesign-vue-next";
 import productionAgentStore from "@/stores/productionAgent";
 import { dryRunImport, importHeal, importScriptBundle } from "@/utils/ruleEngine";
 import type { DryRunImportSummary } from "@/types/ruleEngine";
-import type { InspectBundleResult, RePushPlanItem } from "@/types/closure";
+import type { InspectBundleResult, RePushPlanItem, SmartDesignProposal } from "@/types/closure";
 import ClosureRulePanel from "@/components/closure/RulePanel.vue";
 import { useAdaptationNav } from "@/composables/useAdaptationNav";
+import axios from "@/utils/axios";
+import { toastAfterApplyExitGate } from "@/utils/v5OpsHelpers";
 
 const { goDesignStage } = useAdaptationNav();
 
@@ -132,6 +139,8 @@ const serverFixedIds = ref<string[]>([]);
 const chatMustFixIds = ref<string[]>([]);
 const exportAllowed = ref<boolean | null>(null);
 const chatRepairText = ref("");
+const smartDesignProposals = ref<SmartDesignProposal[]>([]);
+const smartProposalLoading = ref(false);
 
 const salvageBanner = computed(() => {
   const log = shapeSalvageLog.value;
@@ -199,6 +208,7 @@ function resetState() {
   chatMustFixIds.value = [];
   exportAllowed.value = null;
   chatRepairText.value = "";
+  smartDesignProposals.value = [];
   autoDesign.value = true;
   mergeStrategy.value = "preserveMedia";
 }
@@ -229,6 +239,10 @@ async function onDryRun() {
     });
     previewSummary.value = summary;
     closurePreview.value = summary.preImport ?? null;
+    smartDesignProposals.value =
+      summary.preImport?.smartDesignProposals ??
+      (summary as { smartDesignProposals?: SmartDesignProposal[] }).smartDesignProposals ??
+      [];
     shapeSalvageLog.value = summary.shapeSalvageLog ?? summary.exportGate?.shapeSalvageLog ?? [];
     exportAllowed.value = summary.exportGate?.exportAllowed ?? !(summary.preImport?.blocked);
     chatRepairText.value = summary.exportGate?.chatRepairText ?? "";
@@ -261,6 +275,77 @@ async function onDryRun() {
     window.$message.error(err.response?.data?.message || err.message || $t("workbench.production.importScriptBundle.failed"));
   } finally {
     previewLoading.value = false;
+  }
+}
+
+function syncSmartProposalsFromBody(body: { proposals?: SmartDesignProposal[] } | null | undefined) {
+  if (Array.isArray(body?.proposals)) {
+    smartDesignProposals.value = body.proposals;
+    if (closurePreview.value) {
+      closurePreview.value = { ...closurePreview.value, smartDesignProposals: body.proposals };
+    }
+  }
+}
+
+async function callSmartProposalOps(payload: {
+  action: "confirm" | "reject" | "apply";
+  proposalId?: string;
+  fork?: string;
+}) {
+  smartProposalLoading.value = true;
+  try {
+    const data = await axios.post("/scriptAgent/smartProposalOps", {
+      projectId: props.projectId,
+      scriptId: props.scriptId,
+      syncStoryboard: true,
+      ...payload,
+    });
+    return (data as { data?: Record<string, unknown> })?.data ?? data;
+  } finally {
+    smartProposalLoading.value = false;
+  }
+}
+
+async function onConfirmSmartProposal(payload: { proposalId: string; fork?: string }) {
+  try {
+    const body = await callSmartProposalOps({ action: "confirm", ...payload });
+    syncSmartProposalsFromBody(body as { proposals?: SmartDesignProposal[] });
+    window.$message.success("已确认提案路径；可 Apply 写库");
+  } catch (e) {
+    window.$message.error((e as Error)?.message || "Confirm 失败");
+  }
+}
+
+async function onRejectSmartProposal(payload: { proposalId: string }) {
+  try {
+    const body = await callSmartProposalOps({ action: "reject", ...payload });
+    syncSmartProposalsFromBody(body as { proposals?: SmartDesignProposal[] });
+    window.$message.info("已拒绝提案");
+  } catch (e) {
+    window.$message.error((e as Error)?.message || "拒绝失败");
+  }
+}
+
+async function onPresentationFork(payload: { proposalId: string; fork: string }) {
+  await onConfirmSmartProposal(payload);
+}
+
+async function onApplySmartProposals() {
+  try {
+    const body = (await callSmartProposalOps({ action: "apply" })) as {
+      proposals?: SmartDesignProposal[];
+      note?: string;
+      a11yAnnounce?: string;
+      userMessage?: string;
+      exitGate?: { ok?: boolean };
+      exitReassert?: { ok?: boolean };
+      designExitPass?: boolean;
+    };
+    syncSmartProposalsFromBody(body);
+    toastAfterApplyExitGate(body, "提案已写库");
+    if (lastBundle.value) await onDryRun();
+  } catch (e) {
+    window.$message.error((e as Error)?.message || "Apply 失败");
   }
 }
 
