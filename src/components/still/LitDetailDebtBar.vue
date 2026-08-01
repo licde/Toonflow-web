@@ -36,7 +36,25 @@
 
       <t-button v-if="showSplit" size="small" theme="primary" @click="$emit('confirm-split')">
 
-        确认拆镜
+        {{ splitLabel }}
+
+      </t-button>
+
+      <t-button
+
+        v-if="showGenerateContinue"
+
+        size="small"
+
+        theme="primary"
+
+        variant="outline"
+
+        @click="$emit('batch-still')"
+
+      >
+
+        {{ generateContinueLabel }}
 
       </t-button>
 
@@ -52,7 +70,7 @@
 
       >
 
-        重出带道具静照
+        {{ regenPropLabel }}
 
       </t-button>
 
@@ -182,7 +200,7 @@ import {
 
 } from "@/types/stillIntentOps";
 
-import { humanRejudgePrimaryCta, shouldOfferHumanRejudge, type StillMeta } from "@/types/stillQuality";
+import { humanRejudgePrimaryCta, shouldOfferHumanRejudge, resolveStillDebtSemantics, resolveStillPrimaryCtaLabel, type StillMeta } from "@/types/stillQuality";
 
 
 
@@ -370,6 +388,8 @@ const showSplit = computed(
 
 
 
+const debtSemantics = computed(() => resolveStillDebtSemantics(props.stillMeta ?? null));
+
 const showRegenPropStill = computed(
 
   () =>
@@ -378,25 +398,68 @@ const showRegenPropStill = computed(
 
     slots.value.includes("contactGeom") ||
 
+    slots.value.includes("prop_form") ||
+
     findingIds.value.includes("DEX-PROP-IN-FRAME") ||
 
-    findingIds.value.includes("STILL-CONTACT-HANDOFF"),
+    findingIds.value.includes("STILL-CONTACT-HANDOFF") ||
 
+    findingIds.value.includes("PROP-FORM") ||
+
+    debtSemantics.value.kind === "prop_form" ||
+
+    debtSemantics.value.kind === "prop_plate",
+
+);
+
+const regenPropLabel = computed(() =>
+  debtSemantics.value.kind === "prop_form"
+    ? "重出形态静照"
+    : debtSemantics.value.kind === "prop_plate"
+      ? "挂道具板后再生成"
+      : "重出带道具静照",
 );
 
 
 
-const enhanceLabel = computed(() =>
-
-  irdCtaLabel({
-
-    primaryAction: props.primaryAction === "apply_auto_enhance" ? "apply_auto_enhance" : "confirm_enhance",
-
-    missingSlots: slots.value,
-
+const shootableCta = computed(() =>
+  resolveStillPrimaryCtaLabel({
+    ...(props.stillMeta ?? {}),
+    primaryNextStep: props.primaryNextStep ?? props.stillMeta?.primaryNextStep,
+    irdPrimaryAction: props.primaryAction ?? props.stillMeta?.irdPrimaryAction,
+    stillQuality: (props.stillQuality ?? props.stillMeta?.stillQuality) as StillMeta["stillQuality"],
+    ctaLabel: props.ctaLabel ?? props.stillMeta?.ctaLabel,
   }),
-
 );
+
+const splitLabel = computed(() =>
+  shootableCta.value.kind === "split_and_generate" ? shootableCta.value.label : "智拆并生成",
+);
+
+const showGenerateContinue = computed(
+  () =>
+    !showRegenPropStill.value &&
+    (shootableCta.value.kind === "continue_repair" ||
+      shootableCta.value.kind === "generate" ||
+      shootableCta.value.kind === "enhance_and_generate" ||
+      shootableCta.value.kind === "enqueue_identity_and_generate" ||
+      Boolean(props.stillMeta?.requireFixBeforeBurn)),
+);
+
+const generateContinueLabel = computed(() => {
+  if (shootableCta.value.kind === "enqueue_identity_and_generate") return shootableCta.value.label;
+  if (shootableCta.value.kind === "enhance_and_generate") return shootableCta.value.label;
+  if (shootableCta.value.kind === "continue_repair") return shootableCta.value.label;
+  return "继续生成修复";
+});
+
+const enhanceLabel = computed(() => {
+  if (shootableCta.value.kind === "enhance_and_generate") return shootableCta.value.label;
+  return irdCtaLabel({
+    primaryAction: props.primaryAction === "apply_auto_enhance" ? "apply_auto_enhance" : "confirm_enhance",
+    missingSlots: slots.value,
+  });
+});
 
 
 
@@ -424,13 +487,21 @@ const explainText = computed(() => {
 
   if (props.designDebtBlock) {
 
-    return "设计债未清（缺 propInFrame/contactGeom 等）；请先 IRD/手改 VD，再人审。人审不能跳过设计债。";
+    return "设计债建议先补齐（propInFrame/contactGeom 等）；仍可试拍生成，烧片前须对齐。人审不能假绿 hq。";
 
+  }
+
+  if (debtSemantics.value.kind === "prop_form" || debtSemantics.value.kind === "prop_plate") {
+    return debtSemantics.value.explain;
+  }
+
+  if (debtSemantics.value.kind === "key_unmeasured" && showHumanRejudge.value) {
+    return debtSemantics.value.explain;
   }
 
   if (showHumanRejudge.value) {
 
-    return "诊断 Key 可选。当前未测·弱图非失败；主路径为人审通过（未测·非失败），Key 仅作可选增强。";
+    return "诊断 Key 可选（不挡质量流）。结构债未清禁升 hq；像素未测≠结构已过。Key 仅作可选像素增强。";
 
   }
 
@@ -440,9 +511,16 @@ const explainText = computed(() => {
 
   }
 
-  if (slots.value.includes("contactRoleXor")) {
+  if (
+    /lit_contact_mouth_ban|mouthBan/i.test(String(props.reverseTrigger ?? props.code ?? "")) ||
+    slots.value.some((s) => /mouthBan|禁口含/i.test(s))
+  ) {
+    return "接触主题胶水：compose 须含「禁口含/禁纸入口/仅落点触」HARD；缺则增强或手改 VD，禁止只 regen。";
+  }
 
-    return "颊触与口创同镜须互斥句或拆镜；可批准增强补 contactRoleXor，或手改 VD。补全后可继续生成。";
+  if (slots.value.includes("contactRoleXor") || showSplit.value) {
+
+    return "颊触与口创同镜建议智拆并生成；已可试拍（系统会尽量瘦身颊触）。烧片前须拆齐或增强对齐。";
 
   }
 

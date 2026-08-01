@@ -319,15 +319,21 @@ async function regenStoryboardHq() {
     primaryNextStep: healResult.value?.primaryNextStep ?? healResult.value?.nextStep,
     irdPrimaryAction: healResult.value?.primaryAction,
     missingSlots: healResult.value?.missingSlots,
+    // Shootable-first: only missing_identity bricks Generate (resolver ignores literary latch)
     blockSilentRegen: healResult.value?.blockSilentRegen,
+    debtKind: healResult.value?.debtKind,
+    propPlateGrade: healResult.value?.propPlateGrade,
+    keyOptional: healResult.value?.keyOptional,
+    pixelDimStatus: healResult.value?.pixelDimStatus,
+    requireFixBeforeBurn: healResult.value?.requireFixBeforeBurn,
   };
-  if (shouldBlockSilentStillRegen(regenMeta)) {
-    window.$message.warning(
+  // Shootable-first: shouldBlockSilentStillRegen always false — never brick; identity soft-warn only
+  if (String(regenMeta.debtKind ?? "") === "missing_identity") {
+    window.$message.info(
       healResult.value?.userMessage ||
         healResult.value?.ctaLabel ||
-        "须 Confirm / 手改 / 人审后再生成 — 禁止静默重抽",
+        "缺定妆 — 将入队补资产并继续生成（不挡试拍）",
     );
-    return;
   }
   hqLoading.value = true;
   try {

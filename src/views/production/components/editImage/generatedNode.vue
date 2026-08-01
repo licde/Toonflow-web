@@ -289,8 +289,7 @@ function ingestStillGateBody(body: Record<string, unknown> | null | undefined) {
     : null;
   const step = String(body.primaryNextStep ?? "");
   const ird = String(body.irdPrimaryAction ?? "");
-  // Only hard-split latches; ignore stale BE blockSilentRegen for Key-optional / lit enhance
-  const hardSplit = step === "split_shot" || ird === "confirm_split";
+  // Shootable-first: never force blockSilentRegen on split — only missing_identity bricks Generate
   stillMetaSnapshot.value = {
     stillQuality: body.stillQuality as StillMeta["stillQuality"],
     visualPass: body.visualPass as boolean | undefined,
@@ -299,7 +298,8 @@ function ingestStillGateBody(body: Record<string, unknown> | null | undefined) {
     primaryNextStep: body.primaryNextStep as string | undefined,
     irdPrimaryAction: body.irdPrimaryAction as string | undefined,
     missingSlots: litDebtSlots.value,
-    blockSilentRegen: hardSplit,
+    blockSilentRegen: Boolean(body.blockSilentRegen) && String(body.debtKind ?? "") === "missing_identity",
+    refreshStoryboardBeforeRegen: Boolean(body.refreshStoryboardBeforeRegen) || step === "split_shot" || ird === "confirm_split",
     autoRepairStage: body.autoRepairStage as string | undefined,
     autoRepairRound: body.autoRepairRound as number | undefined,
     keepSoftEnvRef: body.keepSoftEnvRef as boolean | undefined,
@@ -310,6 +310,11 @@ function ingestStillGateBody(body: Record<string, unknown> | null | undefined) {
     ctaLabel: body.ctaLabel as string | undefined,
     userMessage: body.userMessage as string | undefined,
     i2vReady: body.i2vReady as boolean | undefined,
+    debtKind: body.debtKind as string | undefined,
+    deliveryTier: body.deliveryTier as StillMeta["deliveryTier"],
+    requireFixBeforeBurn: body.requireFixBeforeBurn as boolean | undefined,
+    ctaKind: body.ctaKind as string | undefined,
+    propPlateGrade: body.propPlateGrade as string | undefined,
   };
 }
 
@@ -384,13 +389,13 @@ async function handleGenerate(overridePrompt?: unknown) {
       promptText = composePreview.value.prompt;
     }
   }
-  if (shouldBlockSilentStillRegen(stillMetaSnapshot.value)) {
-    window.$message.warning(
+  // Shootable-first: never brick Generate; identity soft-info only
+  if (String(stillMetaSnapshot.value?.debtKind ?? "") === "missing_identity") {
+    window.$message.info(
       gateMessage.value ||
         debtCtaLabel.value ||
-        "须 Confirm / 手改 / 人审后再生成 — 禁止静默重抽",
+        "缺定妆 — 将入队补资产并继续生成（不挡试拍）",
     );
-    return;
   }
   generating.value = true;
   lastFeedback.value = null;

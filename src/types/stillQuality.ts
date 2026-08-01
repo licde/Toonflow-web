@@ -71,6 +71,123 @@ export interface StillMeta {
   autoRepairRound?: number;
   autoRepairBudgetLeft?: number;
   handoffReason?: string;
+  /** Event refs echo */
+  refsRoles?: string[];
+  propPlateMissing?: boolean;
+  synthesizedPropPlate?: boolean;
+  softEnvMissingHonest?: boolean;
+  softEnvBakedIntoIdentity?: boolean;
+  softEnvContinuity?: "must" | "optional" | "none" | string;
+  propSource?: string;
+  vendorCalled?: boolean;
+  vendorMs?: number;
+  /** Actuator echo (Comfy / Seedream) */
+  actuatorId?: string;
+  workflowHash?: string;
+  actuatorDegraded?: boolean;
+  actuatorDegradedReason?: string;
+  propPlateGrade?: "asset" | "fe" | "synthetic_geometry" | "missing" | string;
+  egressCompressed?: boolean;
+  /** Structure form miss vs Key-unmeasured vs actuator degrade — FE must not collapse */
+  debtKind?:
+    | "prop_form"
+    | "prop_plate"
+    | "soft_env"
+    | "key_unmeasured"
+    | "actuator_degraded"
+    | "lit_slot"
+    | "missing_identity"
+    | string;
+  /** draft | preview | burn — out ≠ hq_ok */
+  deliveryTier?: "draft" | "preview" | "burn" | string;
+  /** Design debt must clear before burn — does NOT block generate */
+  requireFixBeforeBurn?: boolean;
+  /** Shared CTA kind for Chat/Web */
+  ctaKind?: string;
+}
+
+/** Split structure/form debt vs Key-optional unmeasured vs actuator degrade (三分流). */
+export function resolveStillDebtSemantics(meta: StillMeta | null | undefined): {
+  kind:
+    | "prop_form"
+    | "prop_plate"
+    | "soft_env"
+    | "key_unmeasured"
+    | "actuator_degraded"
+    | "lit_slot"
+    | "none";
+  ctaLabel: string;
+  explain: string;
+} {
+  if (!meta) return { kind: "none", ctaLabel: "", explain: "" };
+  const slots = meta.missingSlots ?? [];
+  const blob = `${meta.userMessage ?? ""} ${meta.ctaLabel ?? ""} ${slots.join(" ")}`;
+  // 1) Actuator degrade — honest Comfy→Seedream fallback (not Key, not form debt)
+  if (meta.actuatorDegraded || meta.debtKind === "actuator_degraded") {
+    return {
+      kind: "actuator_degraded",
+      ctaLabel: "可控后端降级·可人审",
+      explain: `高难镜优选 Comfy 不可用（${meta.actuatorDegradedReason || "degraded"}），已诚实降级 Seedream；非 Key 问题，人审可放行。`,
+    };
+  }
+  // 2) Synthetic geometry — not a real PROP lock
+  if (
+    meta.propPlateGrade === "synthetic_geometry" ||
+    (meta.synthesizedPropPlate && /synthetic|合成/.test(blob + String(meta.propPlateGrade ?? "")))
+  ) {
+    if (/卷棒|纸卷|prop_form|形态|抵颏|synthetic_geometry/.test(blob + String(meta.propPlateGrade ?? ""))) {
+      return {
+        kind: "prop_form",
+        ctaLabel: "挂真道具板后重出",
+        explain: "当前为 synthetic_geometry 几何软板，不冒充形态锁；请挂真 PROP 资产后再出。",
+      };
+    }
+  }
+  // 3) Key optional unmeasured — never「必须装 Key」
+  if (meta.keyOptional || meta.pixelDimStatus === "unmeasured" || meta.debtKind === "key_unmeasured") {
+    if (!slots.some((s) => /prop|contact|form|glyph|softEnv/i.test(s)) && !/卷棒|薄纸|形态|道具板/.test(blob)) {
+      return {
+        kind: "key_unmeasured",
+        ctaLabel: humanRejudgePrimaryCta(meta),
+        explain: "像素诊断 Key 未装/未测（可选）。文学与形态约束仍有效；请人审放行，勿当作缺约束。",
+      };
+    }
+  }
+  if (meta.propPlateMissing || slots.some((s) => /propSoft|propPlate/i.test(s)) || /道具参考板|PROP soft/i.test(blob)) {
+    return {
+      kind: "prop_plate",
+      ctaLabel: "挂道具板后再生成",
+      explain: "接触/道具事件缺道具参考板；请挂 PROP 或允许结构合成软板。",
+    };
+  }
+  if (/卷棒|纸卷|prop_form|形态|抵颏/.test(blob) || slots.some((s) => /prop_form|form/i.test(s))) {
+    return {
+      kind: "prop_form",
+      ctaLabel: "重出形态静照",
+      explain: "道具形态未按契约（须展开薄纸片/禁卷棒抵颏）；请重出静照，勿当作 Key 未测。",
+    };
+  }
+  if (
+    meta.softEnvMissingHonest ||
+    slots.some((s) => /softEnv/i.test(s)) ||
+    /SOFT-ENV-BAKE-FAILED|烘焙失败/.test(blob)
+  ) {
+    return {
+      kind: "soft_env",
+      ctaLabel: /烘焙失败|BAKE/.test(blob) ? "补场景软板后重试" : "补场景软板",
+      explain: /烘焙失败|BAKE/.test(blob)
+        ? "软环境为连贯性必须，但 SCENE 烘焙失败；禁止仅文案写禁止灰棚。"
+        : "软环境 SCENE 板未挂上；成图易灰棚，建议补场景软板。",
+    };
+  }
+  if (slots.length) {
+    return {
+      kind: "lit_slot",
+      ctaLabel: resolveStillRepairCtaLabel(meta),
+      explain: `缺结构槽 ${slots.join("/")}；可增强或手改 VD。`,
+    };
+  }
+  return { kind: "none", ctaLabel: resolveStillRepairCtaLabel(meta), explain: "" };
 }
 
 /**
@@ -146,46 +263,47 @@ export function shouldOfferHumanRejudge(meta: StillMeta | null | undefined): boo
 }
 
 /**
- * Prefer BE `blockSilentRegen` when present; else derive from nextStep / slots.
- * Vendor / retry_shot / Key-optional unmeasured must NEVER brick Generate.
- * Only structural split (same-shot silent regen forbidden) hard-blocks.
+ * Shootable-first: NEVER brick Generate for policy debt.
+ * Identity / lit / fidelity → enqueue+heal CTA, buttons stay clickable.
  */
-export function shouldBlockSilentStillRegen(meta: StillMeta | null | undefined): boolean {
-  if (!meta) return false;
-  const step = String(meta?.primaryNextStep ?? "");
-  const autoStage = String(meta?.autoRepairStage ?? "");
-  // Explicit retry / auto-repair / Key-optional paths — always allow click
-  if (
-    step === "retry_shot" ||
-    step === "soft_patch" ||
-    step === "regen_storyboard_hq" ||
-    step === "batch_still" ||
-    (autoStage && autoStage !== "handoff_human")
-  ) {
-    return false;
-  }
-  // Key optional: unmeasured / missing Key is NOT design debt
-  if (meta.keyOptional === true || meta.pixelDimStatus === "unmeasured") {
-    if (meta.irdPrimaryAction !== "confirm_split" && step !== "split_shot") return false;
-  }
-  // Only confirm_split / split_shot bricks silent regen on the SAME shot
-  const hardSplitBrick =
-    step === "split_shot" || meta?.irdPrimaryAction === "confirm_split";
-  if (hardSplitBrick) return true;
-  // Literary enhance / hand_edit: allow Generate (apply补全 then regen, or reverse-fill then regen)
-  if (
-    meta?.irdPrimaryAction === "confirm_enhance" ||
-    meta?.irdPrimaryAction === "apply_auto_enhance" ||
-    meta?.irdPrimaryAction === "hand_edit_vd" ||
-    (meta?.missingSlots?.length ?? 0) > 0
-  ) {
-    return false;
-  }
-  if (meta.blockSilentRegen === true) {
-    // Stale latch without hard split → allow retry
-    return false;
-  }
+export function shouldBlockSilentStillRegen(_meta: StillMeta | null | undefined): boolean {
   return false;
+}
+
+/** Chat/Web CTA SSOT — same labels on DebtBar and agent tools. */
+export function resolveStillPrimaryCtaLabel(meta: StillMeta | null | undefined): {
+  kind: string;
+  label: string;
+  blocksGenerate: boolean;
+} {
+  if (!meta) return { kind: "generate", label: "生成静帧", blocksGenerate: false };
+  if (meta.debtKind === "missing_identity" || meta.propPlateGrade === "identity_missing") {
+    return { kind: "enqueue_identity_and_generate", label: "补定妆并继续生成", blocksGenerate: false };
+  }
+  if (meta.debtKind === "prompt_fidelity") {
+    return { kind: "enhance_and_generate", label: "增强锚点并生成", blocksGenerate: false };
+  }
+  if (meta.stillQuality === "hq_ok" && meta.visualPass === true) {
+    return { kind: "burn_ready", label: "可烧视频", blocksGenerate: false };
+  }
+  const step = String(meta.primaryNextStep ?? "");
+  const ird = String(meta.irdPrimaryAction ?? "");
+  if (ird === "confirm_split" || step === "split_shot") {
+    return { kind: "split_and_generate", label: "智拆并生成", blocksGenerate: false };
+  }
+  if (ird === "confirm_enhance" || ird === "apply_auto_enhance" || step === "chat_repair") {
+    return { kind: "enhance_and_generate", label: "增强设计并生成", blocksGenerate: false };
+  }
+  if (
+    step === "regen_storyboard_hq" ||
+    step === "retry_shot" ||
+    step === "batch_still" ||
+    meta.pixelDimStatus === "unmeasured" ||
+    meta.keyOptional
+  ) {
+    return { kind: "continue_repair", label: "继续生成修复", blocksGenerate: false };
+  }
+  return { kind: "generate", label: "生成静帧", blocksGenerate: false };
 }
 
 /** After split_shot success: FE must reload panels before generating child shots. */

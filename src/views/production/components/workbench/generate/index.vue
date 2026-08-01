@@ -870,8 +870,7 @@ onMounted(() => {
 async function generateVideo() {
   if (!(await runPreflight())) return;
   if (currentTrack.value?.state === "需完善" || currentTrack.value?.burnAllowed === false) {
-    window.$message.warning("提示词未达烧片标准（需完善），请先重编译或按清单修复后再烧");
-    return;
+    window.$message.info("提示词有契约债 — 将 heal_then_burn（增强后继续烧），不挡操作");
   }
   const dlg = DialogPlugin.confirm({
     header: $t("workbench.generate.generateConfirm"),

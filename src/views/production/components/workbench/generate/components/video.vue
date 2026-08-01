@@ -4,17 +4,16 @@
       <t-button
         size="small"
         :loading="generating"
-        :disabled="currentTrack?.state === '需完善' || currentTrack?.burnAllowed === false"
         :title="
           currentTrack?.state === '需完善' || currentTrack?.burnAllowed === false
-            ? '提示词需完善，不可烧片'
+            ? '契约债未清 — 点击将 heal_then_burn（增强后继续烧）'
             : undefined
         "
         @click="emit('generate')"
       >
         {{
           currentTrack?.state === "需完善" || currentTrack?.burnAllowed === false
-            ? "需完善·不可烧"
+            ? "增强并继续烧"
             : $t("workbench.generate.generate")
         }}
       </t-button>
