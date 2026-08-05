@@ -246,16 +246,24 @@ async function onDryRun() {
     shapeSalvageLog.value = summary.shapeSalvageLog ?? summary.exportGate?.shapeSalvageLog ?? [];
     exportAllowed.value = summary.exportGate?.exportAllowed ?? !(summary.preImport?.blocked);
     chatRepairText.value = summary.exportGate?.chatRepairText ?? "";
-    chatMustFixIds.value = summary.exportGate?.closureSnapshot?.blockIds ?? [];
+    chatMustFixIds.value =
+      summary.chatMustFixIds ??
+      summary.exportGate?.chatMustFixIds ??
+      summary.exportGate?.laneDiagnostics?.mustIds ??
+      [];
     serverFixedIds.value = [...new Set(shapeSalvageLog.value.map((e) => e.ruleId))];
     if (summary.exportGate) {
       const { blocks = 0, warns = 0 } = summary.exportGate.coverage ?? {};
       const salvageN = shapeSalvageLog.value.length;
+      const mustN = chatMustFixIds.value.length;
+      const autoN = summary.exportGate.laneDiagnostics?.autoIds?.length ?? 0;
       window.$message.info(
         `预览更新完成 · ${summary.tier ?? summary.preImport?.tier ?? "T2"} · ${summary.exportGate.exportAllowed ? "可导入" : "阻断"} · ${
-          (summary.exportGate.closureSnapshot?.blockIds ?? []).length
-            ? `规则 ${(summary.exportGate.closureSnapshot?.blockIds ?? []).slice(0, 8).join(",")}`
-            : `BLOCK ${blocks} / WARN ${warns}`
+          mustN
+            ? `须手改 ${chatMustFixIds.value.slice(0, 8).join(",")}`
+            : autoN
+              ? `服务端将愈 ${autoN} · BLOCK ${blocks} / WARN ${warns}`
+              : `BLOCK ${blocks} / WARN ${warns}`
         }${salvageN ? ` · 已自动修复 ${salvageN}` : ""}`,
       );
     }
@@ -268,7 +276,15 @@ async function onDryRun() {
     if (crt) {
       exportAllowed.value = false;
       chatRepairText.value = crt;
-      if (Array.isArray(details?.blocks)) {
+      const mustFromErr = Array.isArray(details?.chatMustFixIds)
+        ? (details.chatMustFixIds as string[]).map(String).filter(Boolean)
+        : Array.isArray((details?.laneDiagnostics as { mustIds?: string[] } | undefined)?.mustIds)
+          ? ((details.laneDiagnostics as { mustIds: string[] }).mustIds ?? []).map(String).filter(Boolean)
+          : null;
+      if (mustFromErr) {
+        chatMustFixIds.value = mustFromErr;
+      } else if (Array.isArray(details?.blocks)) {
+        // Legacy fallback only when BE omitted lane fields
         chatMustFixIds.value = (details.blocks as { id?: string }[]).map((b) => String(b.id ?? "")).filter(Boolean);
       }
     }

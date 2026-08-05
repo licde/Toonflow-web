@@ -82,13 +82,14 @@ export default defineStore(
           const { data } = await axios.post("/production/workbench/getFileUrl", {
             items: needResolve.map((item) => ({ id: item.id, sources: item.sources })),
           });
-          // axios 拦截器已返回 response.data，后端可能再包一层 { data: { ... } }
-          const rawData = data.data;
+          // axios interceptor returns { code, data, message }; tolerate legacy double-wrap
+          let rawData = data?.data ?? data;
+          if (rawData && typeof rawData === "object" && !Array.isArray(rawData) && (rawData as any).data && typeof (rawData as any).data === "object") {
+            rawData = (rawData as any).data;
+          }
 
-          // 兼容多种后端响应格式
           const resolved: Record<string, string> = {};
           if (Array.isArray(rawData)) {
-            // 格式: [{ id: 1, sources: "storyboard", url: "http://..." }, ...]
             rawData.forEach((item: any) => {
               if (item.id != null && item.url) {
                 const key = makeUrlKey(item.id, item.sources);
@@ -96,13 +97,11 @@ export default defineStore(
               }
             });
           } else if (rawData && typeof rawData === "object" && !Array.isArray(rawData)) {
-            // 格式: { "id:sources": fullUrl } 或 { [compositeKey]: fullUrl }
             Object.entries(rawData).forEach(([key, url]) => {
-              resolved[key] = url as string;
+              if (typeof url === "string" && url) resolved[key] = url;
             });
           }
 
-          // 替换整个对象以触发 Vue 响应式更新
           urlMap.value = { ...urlMap.value, ...resolved };
         } catch (e) {
           console.warn("[imageListCache] resolveUrls 请求失败，降级使用路径", e);
@@ -183,7 +182,7 @@ export default defineStore(
       imageList.forEach((item) => {
         if (!item.src || item.id == null) return;
         const key = makeUrlKey(item.id, (item as any).sources);
-        if (!urlMap.value[key]) {
+        if (urlMap.value[key] !== item.src) {
           urlMap.value[key] = item.src;
           urlMapDirty = true;
         }
@@ -231,16 +230,43 @@ export default defineStore(
       }
     }
     /**
-     * 从后端返回的 trackList 批量初始化缓存
-     * 只有当对应轨道没有缓存时才写入（保留用户本地编辑）
+     * Init cache from backend trackList.
+     * Missing track -> write; existing track -> heal empty storyboard src from backend.
      */
     function initCacheFromTrackList(projectId: CacheKey, scriptId: CacheKey, trackList: TrackItem[]): void {
       trackList.forEach((track) => {
         if (track.id == null) return;
-        if (cacheData.value[projectId]?.[scriptId]?.[track.id]) return;
         if (!cacheData.value[projectId]) cacheData.value[projectId] = {};
         if (!cacheData.value[projectId][scriptId]) cacheData.value[projectId][scriptId] = {};
-        cacheData.value[projectId][scriptId][track.id] = toCachedItems(track.medias);
+        const existing = cacheData.value[projectId][scriptId][track.id];
+        if (!existing) {
+          cacheData.value[projectId][scriptId][track.id] = toCachedItems(track.medias);
+          return;
+        }
+        const byKey = new Map(
+          existing.map((c) => [`${c.id ?? ""}:${(c as any).sources ?? "storyboard"}`, c] as const),
+        );
+        let dirty = false;
+        for (const m of track.medias ?? []) {
+          if (!m?.src || m.id == null) continue;
+          const sources = (m as any).sources ?? "storyboard";
+          if (sources !== "storyboard") continue;
+          const key = `${m.id}:${sources}`;
+          const cur = byKey.get(key);
+          if (!cur) {
+            existing.push(...toCachedItems([m]));
+            byKey.set(key, existing[existing.length - 1]!);
+            dirty = true;
+            continue;
+          }
+          if (!cur.src && m.src) {
+            cur.src = extractPath(m.src);
+            dirty = true;
+          }
+        }
+        if (dirty) {
+          cacheData.value[projectId][scriptId][track.id] = [...existing];
+        }
       });
     }
 

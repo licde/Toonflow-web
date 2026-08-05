@@ -224,6 +224,10 @@ export async function selfHeal(body: {
     message: string;
     retrySuggested?: boolean;
     appliedToDb?: boolean;
+    cdHydrated?: string[];
+    nextStep?: string;
+    ctaLabel?: string;
+    primaryNextStep?: string;
   }>("/ruleEngine/selfHeal", body);
 }
 
@@ -274,6 +278,14 @@ export async function importHeal(body: {
       coverage?: { blocks: number; warns: number };
       blocks?: { id: string; message: string }[];
       warns?: { id: string; message: string }[];
+      chatMustFixIds?: string[];
+      laneDiagnostics?: {
+        mustIds: string[];
+        autoIds: string[];
+        actuatorsRan?: string[];
+        cleared?: string[];
+        residual?: string[];
+      };
     };
     inspected: import("@/types/closure").InspectBundleResult;
     serverFixedIds: string[];

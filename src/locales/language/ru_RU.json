@@ -1069,7 +1069,7 @@
         "importingLoading": "Импорт, пожалуйста, подождите...",
         "mainTrackVideo": "Основная дорожка (Видео)",
         "subtitle1": "Субтитры 1",
-        "storyboardVideoName": "{раскадровка}-{id}.mp4"
+        "storyboardVideoName": "{storyboard}-{id}.mp4"
       },
       "preview": {
         "noImage": "Нет изображения",
@@ -1496,7 +1496,7 @@
   "selectAll": "Выбрать все",
   "selected": "Выбрано",
   "importVideo": "Импортировать видео",
-  "emptyTrack": "Абзац {индекс 1}",
+  "emptyTrack": "Абзац {index}",
   "del": "Подтвердить удаление",
   "delConfirm": "Вы уверены, что хотите удалить этот абзац?",
   "selectSource": "Выберите источник",

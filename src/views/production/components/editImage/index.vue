@@ -265,7 +265,46 @@ onMounted(async () => {
     if (!data) return buildFlow();
     edges.value = data.edges.map((e: any) => ({ ...e, ...DEFAULT_EDGE_OPTIONS }));
     nodes.value = data.nodes;
+    // SingleShotClosed: literary SSOT from open payload — never keep stale vendor soup / foreign propSoft
+    const litPrompt = props.flowData.resultImages?.[0]?.prompt;
+    if (litPrompt) {
+      for (const n of nodes.value) {
+        if (n.type === "generated" && n.data) {
+          (n.data as GeneratedNodeData).prompt = litPrompt;
+        }
+      }
+    }
+    const needed = (props.flowData.referanceImages ?? []).filter(Boolean);
+    const allowedRef = new Set(needed);
+    nodes.value = nodes.value.filter((n) => {
+      if (n.type !== "upload") return true;
+      const d = n.data as UploadNodeData & { role?: string };
+      if (d?.role === "propSoft") {
+        return Boolean(d.image && allowedRef.has(d.image));
+      }
+      return true;
+    });
+    const keptIds = new Set(nodes.value.map((n) => n.id));
+    edges.value = edges.value.filter((e) => keptIds.has(e.source) && keptIds.has(e.target));
+    // Merge missing associate refs onto saved flowId graph
+    const existingImgs = new Set(
+      nodes.value.filter((n) => n.type === "upload").map((n) => (n.data as UploadNodeData)?.image).filter(Boolean),
+    );
+    const genIds = nodes.value.filter((n) => n.type === "generated").map((n) => n.id);
+    for (const img of needed) {
+      if (existingImgs.has(img)) continue;
+      const sid = addUploadNode("upload", img);
+      for (const gid of genIds) {
+        edges.value.push({
+          id: uuid(),
+          source: sid,
+          target: gid,
+          ...DEFAULT_EDGE_OPTIONS,
+        });
+      }
+    }
     await nextTick();
+    syncReferences();
     setTimeout(() => fitView({ duration: 300 }), 100);
   } catch (e) {
     window.$message.error((e as any).message || $t("workbench.production.editImage.fetchFailed"));

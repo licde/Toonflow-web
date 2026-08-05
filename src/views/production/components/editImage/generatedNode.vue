@@ -42,8 +42,21 @@
       <div class="text w">
         <PromptEditor v-model="data.prompt" :references="references" :placeholder="$t('workbench.production.editImage.promptPlaceholder')" />
       </div>
-      <div v-if="gateMessage || promptUsedSummary || litDebtSlots.length" class="feedbackBox w">
+      <div v-if="gateMessage || promptUsedSummary || attuChips.length || litDebtSlots.length" class="feedbackBox w">
         <t-alert :theme="stillQuality === 'hq_ok' ? 'success' : 'warning'" :message="gateMessage || '合成提示词已更新'" />
+        <div v-if="attuChips.length" class="attuChipRow">
+          <div
+            v-for="chip in attuChips"
+            :key="chip.token"
+            class="attuChip"
+            :class="{ missing: chip.missingThumb }"
+            :title="chip.label"
+          >
+            <t-image v-if="chip.thumbUrl" :src="chip.thumbUrl" fit="cover" class="attuChipThumb" />
+            <span v-else class="attuChipDot" />
+            <span class="attuChipLabel">{{ chip.token }}</span>
+          </div>
+        </div>
         <p v-if="promptUsedSummary" class="promptSummary">{{ promptUsedSummary }}</p>
         <LitDetailDebtBar
           v-if="stillQuality === 'weak' || sheetLeak || litDebtSlots.length"
@@ -142,7 +155,14 @@ import { useFileDialog } from "@vueuse/core";
 import projectStore from "@/stores/project";
 import { resolveGeneratePrompt } from "@/utils/resolveGeneratePrompt";
 import LitDetailDebtBar from "@/components/still/LitDetailDebtBar.vue";
-import { shouldBlockSilentStillRegen, type StillMeta } from "@/types/stillQuality";
+import {
+  shouldBlockSilentStillRegen,
+  resolveAtTuEgressChips,
+  resolveStillCanvasDisplayPrompt,
+  resolveStillPrimaryCtaLabel,
+  type AtTuEgressChip,
+  type StillMeta,
+} from "@/types/stillQuality";
 import { toastAfterApplyExitGate } from "@/utils/v5OpsHelpers";
 const { project } = storeToRefs(projectStore());
 const openStoryboardCheck = inject<() => Promise<Storyboard[]>>("openStoryboardCheck")!;
@@ -169,7 +189,31 @@ const composePreview = ref<{
   entityAnchors?: string[];
 } | null>(null);
 const promptUsedSummary = ref("");
+const attuChips = ref<AtTuEgressChip[]>([]);
 const lastComposeMode = ref<"full" | "refine" | "fidelity">("full");
+
+function refreshAtTuChips(body: Record<string, unknown> | null | undefined) {
+  const egress = String(
+    body?.canvasDisplayPrompt ||
+      body?.vendorPromptUsed ||
+      body?.promptUsed ||
+      body?.egressPrompt ||
+      "",
+  ).trim();
+  const roles = (body?.refsRoles as string[] | undefined) ?? stillMetaSnapshot.value?.refsRoles;
+  const thumbs =
+    (body?.refThumbUrls as string[] | undefined) ??
+    stillMetaSnapshot.value?.refThumbUrls ??
+    undefined;
+  const fallback = (props.data.references ?? []).map((r) => r.image);
+  const resolved = resolveAtTuEgressChips({
+    egressPrompt: egress,
+    refsRoles: roles,
+    refThumbUrls: thumbs,
+    fallbackThumbs: fallback,
+  });
+  attuChips.value = resolved.chips;
+}
 const episodesId = inject<Ref<number>>("episodesId")!;
 const lastFeedback = ref<{ suggestedPrompt?: string; message?: string } | null>(null);
 const storyboardId = inject<Ref<number | undefined> | number | undefined>("editStoryboardId", undefined);
@@ -195,7 +239,7 @@ function looksDirtyPrompt(p: string): boolean {
 }
 
 const emit = defineEmits(["keep"]);
-const { removeNodes } = useVueFlow("editImage");
+const { removeNodes, addNodes, addEdges, getNodes } = useVueFlow("editImage");
 
 const options = [
   { content: $t("workbench.production.editImage.uploadImage"), value: 1 },
@@ -315,7 +359,20 @@ function ingestStillGateBody(body: Record<string, unknown> | null | undefined) {
     requireFixBeforeBurn: body.requireFixBeforeBurn as boolean | undefined,
     ctaKind: body.ctaKind as string | undefined,
     propPlateGrade: body.propPlateGrade as string | undefined,
+    refsRoles: body.refsRoles as string[] | undefined,
+    refThumbUrls: body.refThumbUrls as string[] | undefined,
+    vendorPromptUsed: (body.vendorPromptUsed as string | undefined) ?? (body.promptUsed as string | undefined),
+    promptUsed: body.promptUsed as string | undefined,
+    oneClickRepairKind: body.oneClickRepairKind as string | undefined,
+    canvasDisplayPrompt: body.canvasDisplayPrompt as string | undefined,
   };
+  refreshAtTuChips(body);
+  if (!debtCtaLabel.value) {
+    const cta = resolveStillPrimaryCtaLabel(stillMetaSnapshot.value);
+    if (cta.label && cta.kind !== "generate") {
+      debtCtaLabel.value = cta.label;
+    }
+  }
 }
 
 async function loadComposePreview(opts?: {
@@ -402,7 +459,28 @@ async function handleGenerate(overridePrompt?: unknown) {
   gateMessage.value = "";
   promptUsedSummary.value = "";
   try {
-    const refs = props.data.references.map((i) => i.image).filter(Boolean) as string[];
+    // Prefer identity → propSoft → softEnv so Seedream weights prop mid-slot
+    const rawRefs = props.data.references.map((i) => i.image).filter(Boolean) as string[];
+    const nodesNow = getNodes.value || [];
+    const roleByImg = new Map<string, string>();
+    for (const n of nodesNow) {
+      if (n.type !== "upload") continue;
+      const d = n.data as { image?: string; role?: string };
+      if (d?.image) roleByImg.set(d.image, d.role || "");
+    }
+    const score = (url: string) => {
+      const role = roleByImg.get(url) || "";
+      if (role === "propSoft") return 1;
+      // Heuristic: soft plate / 休书 URLs mid; hall/scene last when unlabeled
+      if (/休书|prop|软板|paper/i.test(url)) return 1;
+      return 0;
+    };
+    const refs = [...rawRefs].sort((a, b) => score(a) - score(b));
+    // Keep one identity-like first: if prop floated first, rotate
+    if (refs.length >= 2 && score(refs[0]!) === 1 && score(refs[1]!) === 0) {
+      const [p, ...rest] = refs;
+      refs.splice(0, refs.length, rest[0]!, p!, ...rest.slice(1));
+    }
     const imageMode = refs.length <= 0 ? "text" : refs.length === 1 ? "singleImage" : "multiReference";
     const { data } = await axios.post("/production/editImage/generateFlowImage", {
       references: refs,
@@ -420,15 +498,61 @@ async function handleGenerate(overridePrompt?: unknown) {
     });
     const body = data?.data ?? data;
     props.data.generatedImage = body.url ?? body;
-    if (body.promptUsed) {
-      props.data.prompt = body.promptUsed;
+    // Literary SSOT only — never recycle vendor egress (promptUsed) into the editor
+    if (body.prompt) {
+      props.data.prompt = body.prompt;
+    }
+    const egressEcho =
+      (body.canvasDisplayPrompt as string | undefined) ||
+      resolveStillCanvasDisplayPrompt({
+        vendorPromptUsed: body.vendorPromptUsed as string | undefined,
+        promptUsed: body.promptUsed as string | undefined,
+      }) ||
+      body.egressPrompt;
+    if (egressEcho) {
       promptUsedSummary.value =
         (body.didSynthesize ? "【已智能合成】" : "") +
-        String(body.promptUsed).slice(0, 180) +
-        (String(body.promptUsed).length > 180 ? "…" : "");
+        String(egressEcho).slice(0, 220) +
+        (String(egressEcho).length > 220 ? "…" : "");
     }
+    refreshAtTuChips(body);
     ingestStillGateBody(body);
     if (body.feedback) lastFeedback.value = body.feedback;
+    // Hang PROP soft plate — SingleShotClosed: never on oral / closedCompose false
+    const propUrl = body.propSoftPreviewUrl as string | undefined;
+    const oralOrOpen =
+      body.closedCompose === false ||
+      body.framingMode === "lips_ecu" ||
+      /咬唇|渗血|唇部特写|lip_bite/.test(String(body.prompt ?? props.data.prompt ?? ""));
+    if (propUrl && !oralOrOpen) {
+      const refsNow = props.data.references ?? [];
+      if (!refsNow.some((r) => r.image === propUrl)) {
+        props.data.references = [...refsNow, { image: propUrl }];
+      }
+      try {
+        const existing = getNodes.value || [];
+        const already = existing.some((n) => n.type === "upload" && (n.data as { image?: string })?.image === propUrl);
+        if (!already) {
+          const newId = crypto.randomUUID?.() ?? `prop-${Date.now()}`;
+          const uploads = existing.filter((n) => n.type === "upload");
+          const lastY = uploads.length ? Math.max(...uploads.map((n) => n.position?.y ?? 100)) + 350 : 100;
+          addNodes([
+            {
+              id: newId,
+              type: "upload",
+              position: { x: 100, y: lastY },
+              data: { image: propUrl, role: "propSoft" },
+            },
+          ]);
+          if (props.id) {
+            addEdges([{ id: `${newId}->${props.id}`, source: newId, target: props.id }]);
+          }
+          window.$message?.info?.("已挂道具软板到画布；请再点生成，才会写入成图像素");
+        }
+      } catch {
+        /* canvas hang best-effort */
+      }
+    }
   } catch (e: any) {
     const payload = e?.response?.data?.data ?? e?.data ?? {};
     const fb = payload.feedback;
@@ -694,6 +818,56 @@ onMounted(() => {
       display: flex;
       flex-direction: column;
       gap: 6px;
+
+      .promptSummary {
+        margin: 0;
+        font-size: 12px;
+        line-height: 1.45;
+        color: var(--td-text-color-secondary);
+        word-break: break-all;
+        max-height: 72px;
+        overflow: auto;
+      }
+
+      .attuChipRow {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .attuChip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 6px 2px 2px;
+        border: 1px solid var(--td-border-level-2-color);
+        border-radius: 6px;
+        background: var(--td-bg-color-secondarycontainer);
+        font-size: 11px;
+
+        &.missing {
+          border-color: var(--td-error-color);
+        }
+
+        .attuChipThumb {
+          width: 22px;
+          height: 22px;
+          border-radius: 4px;
+        }
+
+        .attuChipDot {
+          width: 8px;
+          height: 8px;
+          margin: 0 4px;
+          border-radius: 50%;
+          background: var(--td-error-color);
+        }
+
+        .attuChipLabel {
+          color: var(--td-text-color-primary);
+          white-space: nowrap;
+        }
+      }
     }
 
     .imageRefs {

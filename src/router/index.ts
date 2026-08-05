@@ -1,4 +1,16 @@
 import { createRouter, createWebHashHistory } from "vue-router";
+import projectStore from "@/stores/project";
+
+/** Routes that require an active project in pinia (cleared when visiting /project). */
+const PROJECT_REQUIRED = new Set([
+  "/novel",
+  "/script",
+  "/scriptAgent",
+  "/cornerScape",
+  "/production",
+  "/assets",
+]);
+
 const router = createRouter({
   history: createWebHashHistory(),
   routes: [
@@ -74,12 +86,17 @@ const router = createRouter({
 router.beforeEach((to, from, next) => {
   if (to.path === "/login") {
     next();
-  } else {
-    if (localStorage.getItem("token")) {
-      next();
-    } else {
-      next("/login");
-    }
+    return;
   }
+  if (!localStorage.getItem("token")) {
+    next("/login");
+    return;
+  }
+  if (PROJECT_REQUIRED.has(to.path) && !projectStore().project?.id) {
+    window.$message?.warning?.(window.$t?.("workbench.selectProject") ?? "请选择项目");
+    next("/project");
+    return;
+  }
+  next();
 });
 export default router;

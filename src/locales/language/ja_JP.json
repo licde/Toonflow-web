@@ -529,7 +529,7 @@
         "visualManualDeleted": "正常に削除されました",
         "selectMode": "モードを選択してください",
         "deleteDirectorManualHeader": "ディレクターズマニュアルの削除",
-        "deleteDirectorManualBody": "ディレクターズマニュアル「{名前}」を削除してもよろしいですか?",
+        "deleteDirectorManualBody": "ディレクターズマニュアル「{name}」を削除してもよろしいですか?",
         "directorManualUpdated": "ディレクターズマニュアルを更新しました",
         "directorManualAdded": "ディレクターズマニュアルを追加しました",
         "directorManual": "プロジェクトディレクターズマニュアルを選択してください",
@@ -1069,7 +1069,7 @@
         "importingLoading": "インポート中です。しばらくお待ちください...",
         "mainTrackVideo": "メイントラック（動画）",
         "subtitle1": "字幕1",
-        "storyboardVideoName": "{ストーリーボード}-{id}.mp4"
+        "storyboardVideoName": "{storyboard}-{id}.mp4"
       },
       "preview": {
         "noImage": "画像なし",
@@ -1496,7 +1496,7 @@
   "selectAll": "すべて選択",
   "selected": "選択済み",
   "importVideo": "ビデオをインポートする",
-  "emptyTrack": "段落 {インデックス 1}",
+  "emptyTrack": "段落 {index}",
   "del": "削除の確認",
   "delConfirm": "この段落を削除してもよろしいですか?",
   "selectSource": "ソースを選択",

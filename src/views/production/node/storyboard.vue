@@ -5,6 +5,18 @@
       <Handle :id="props.handleIds.target" type="target" :position="Position.Left" style="left: calc(-1 * var(--td-comp-paddingLR-xl))" />
       <Handle :id="props.handleIds.source" type="source" :position="Position.Right" style="right: calc(-1 * var(--td-comp-paddingLR-xl))" />
     </div>
+    <t-alert
+      v-if="visSyncDebt"
+      theme="warning"
+      style="margin: 8px 12px 0"
+      :message="visSyncDebt.message || '分镜表与面板数量不一致'"
+    >
+      <template #operation>
+        <t-button size="small" theme="primary" :loading="resyncLoading" @click="resyncFromTable">
+          {{ visSyncDebt.ctaLabel || "按分镜表重同步面板" }}
+        </t-button>
+      </template>
+    </t-alert>
     <div class="content">
       <t-empty v-if="!storyboard.length" style="margin-top: 16px"></t-empty>
       <t-checkbox-group v-model="selectedIds">
@@ -31,7 +43,7 @@
                   <div class="ac frameCheckbox" :style="{ transform: `scale(${styleMaxSize})` }">
                     <t-checkbox :checked="selectedIds.includes(item.id!)" @click.stop :key="item?.id || index" :value="item.id" />
                     <t-tag class="frameTypeTag" :style="{ backgroundColor: tagColors[index % tagColors.length] }">
-                      S{{ String(index + 1).padStart(2, "0") }}
+                      S{{ String(item.displayNo ?? (item.index != null ? item.index + 1 : index + 1)).padStart(2, "0") }}
                     </t-tag>
                   </div>
 
@@ -161,7 +173,8 @@ function stillFrameBadge(item: Storyboard): string {
   } as StillMeta);
 }
 const { project } = storeToRefs(projectStore());
-const { episodesId } = storeToRefs(productionAgentStore());
+const prodStore = productionAgentStore();
+const { episodesId, flowData } = storeToRefs(prodStore);
 
 const props = defineProps<{
   id: string;
@@ -181,6 +194,35 @@ const gridScale = useLocalStorage("storyboardGridScale", 1);
 
 const hoveredIndex = ref<number | null>(null);
 const selectedIds = ref<number[]>([]);
+const resyncLoading = ref(false);
+const visSyncDebt = computed(() => {
+  const fd = flowData.value as {
+    visSyncDebt?: { message?: string; ctaLabel?: string };
+    visSyncDrift?: { drifted?: boolean; message?: string; ctaLabel?: string };
+  };
+  if (fd?.visSyncDebt) return fd.visSyncDebt;
+  if (fd?.visSyncDrift?.drifted) return fd.visSyncDrift;
+  return null;
+});
+
+async function resyncFromTable() {
+  if (!project.value?.id || !episodesId.value) return;
+  resyncLoading.value = true;
+  try {
+    const { data } = await axios.post("/production/storyboard/resyncFromTable", {
+      projectId: project.value.id,
+      scriptId: episodesId.value,
+    });
+    const body = data?.data ?? data;
+    window.$message.success(body?.message || "已按分镜表重同步");
+    await prodStore.getFlowData();
+    if (flowData.value?.storyboard) storyboard.value = flowData.value.storyboard;
+  } catch (e: any) {
+    window.$message.error(e?.response?.data?.message || e?.message || "按表重同步失败");
+  } finally {
+    resyncLoading.value = false;
+  }
+}
 
 function setHoveredFrame(index: number | null) {
   hoveredIndex.value = index;
@@ -410,7 +452,7 @@ function editStoryboaryImage(item: Storyboard, images: string[], insertAfterInde
 
     if (item.associateAssetsIds && item.associateAssetsIds.length > 0) {
       for (const id of item.associateAssetsIds) {
-        const src = resolveAssetSrc(id);
+        const src = resolveAssetSrc(id) || item.associateAssetSrcs?.[id];
         if (src) imagesPush.push(src);
         else {
           const hit = findAssetById(id);

@@ -157,7 +157,7 @@
                 <div v-else class="shotPlaceholder">
                   <i-pic theme="outline" size="24" fill="#999" />
                 </div>
-                <t-tag class="shotNumber" size="small" variant="dark">#{{ shot.id }}</t-tag>
+                <t-tag class="shotNumber" size="small" variant="dark">#{{ shot.displayNo ?? (shot.index != null ? shot.index + 1 : shot.id) }}</t-tag>
               </div>
             </div>
           </TransitionGroup>
@@ -199,6 +199,9 @@ interface Shot {
   title?: string;
   selected?: boolean;
   characters?: ShotCharacter[];
+  index?: number;
+  displayNo?: number;
+  badge?: string;
 }
 const episodesId = inject<Ref<number>>("episodesId");
 

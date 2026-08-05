@@ -202,11 +202,15 @@ export function videoIrdCtaLabel(input: {
 
   }
 
-  if (isVideoPromptStaleSignal(input)) return "重编译视频提示词";
+  if (isVideoPromptStaleSignal(input)) return "智能修复";
+
+  if (input.primaryNextStep === "soft_patch" || input.primaryNextStep === "regen_storyboard_hq") {
+    return "智能修复";
+  }
 
   if (input.primaryAction === "confirm_enhance") {
 
-    return slots.length ? `批准增强补${slots.slice(0, 3).join("/")}` : "批准视频设计增强";
+    return slots.length ? `智能修复·补${slots.slice(0, 3).join("/")}` : "智能修复";
 
   }
 

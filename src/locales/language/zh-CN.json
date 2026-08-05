@@ -1584,7 +1584,7 @@
       "importFixture": {
         "tooltip": "导入测试 JSON",
         "title": "导入测试数据",
-        "hint": "粘贴或上传 JSON。支持 flow-data-template.json 格式，或 { \"flowData\": {...}, \"package\": {...} } 合并格式。模板见 Toonflow-app/data/fixtures/",
+        "hint": "粘贴或上传 JSON。支持 flow-data-template.json 格式，或含 flowData / package 的合并格式。模板见 Toonflow-app/data/fixtures/",
         "placeholder": "粘贴 flowData 或合并 JSON…",
         "upload": "选择 JSON 文件",
         "syncPackage": "同步 EpisodePackage",
@@ -1610,6 +1610,13 @@
         "willCreate": "将创建新剧本",
         "willOverwrite": "将覆盖层级",
         "storyboardCount": "分镜数量"
+      },
+      "rulePanel": {
+        "title": "规则校验",
+        "refresh": "刷新",
+        "autofix": "修复",
+        "empty": "无校验问题",
+        "preflightBlock": "触达前预检未通过，请先修复 BLOCK 项"
       }
     },
     "task": {

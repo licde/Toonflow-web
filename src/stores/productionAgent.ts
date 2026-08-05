@@ -470,15 +470,20 @@ function makeProductionAgentStore(projectId: string) {
       },
     );
 
-    function updateContext() {
-      if (episodesId.value! < 0) return;
+    async function updateContext() {
+      if ((episodesId.value ?? -1) < 0) return;
       const ctx = {
         isolationKey: `${projectId}:productionAgent:${episodesId.value}`,
         projectId: projectId,
         scriptId: episodesId.value,
       };
-      if (!connected.value) connect();
-      socket.value!.emit("updateContext", ctx);
+      try {
+        if (!socket.value) await connect();
+        else if (!connected.value) void connect();
+        socket.value?.emit("updateContext", ctx);
+      } catch (e) {
+        console.warn("[productionAgent] updateContext failed", e);
+      }
     }
     async function addStoryboardInfo(items: any[]) {
       const { data } = await axios.post("/production/storyboard/batchAddStoryboardInfo", {

@@ -89,13 +89,13 @@ const menuList = ref([
 ]);
 
 const rightBtnList = ref([
-  { type: "btn", path: "/novel", labelKey: "workbench.menu.novel", icon: "i-notebook", nodelOnly: true },
-  { type: "btn", path: "/scriptAgent", labelKey: "workbench.menu.scriptAgent", icon: "i-color-filter", nodelOnly: true },
-  { type: "btn", path: "/script", labelKey: "workbench.menu.scriptManage", icon: "i-document-folder" },
-  { type: "btn", path: "/cornerScape", labelKey: "workbench.menu.cornerScape", icon: "i-peoples-two" },
-  { type: "btn", path: "/production", labelKey: "workbench.menu.production", icon: "i-carousel-video" },
+  { type: "btn", path: "/novel", labelKey: "workbench.menu.novel", icon: "i-notebook", nodelOnly: true, needProject: true },
+  { type: "btn", path: "/scriptAgent", labelKey: "workbench.menu.scriptAgent", icon: "i-color-filter", nodelOnly: true, needProject: true },
+  { type: "btn", path: "/script", labelKey: "workbench.menu.scriptManage", icon: "i-document-folder", needProject: true },
+  { type: "btn", path: "/cornerScape", labelKey: "workbench.menu.cornerScape", icon: "i-peoples-two", needProject: true },
+  { type: "btn", path: "/production", labelKey: "workbench.menu.production", icon: "i-carousel-video", needProject: true },
   { type: "divider" },
-  { type: "btn", path: "/assets", labelKey: "workbench.menu.assetCenter", icon: "i-receive" },
+  { type: "btn", path: "/assets", labelKey: "workbench.menu.assetCenter", icon: "i-receive", needProject: true },
 ]);
 
 const router = useRouter();
@@ -110,7 +110,11 @@ watch(
 );
 
 function handleClick(menu: any) {
-  if (menu.needProject && !project.value) return;
+  if (menu.needProject && !project.value?.id) {
+    window.$message?.warning?.($t("workbench.selectProject"));
+    router.push("/project");
+    return;
+  }
   router.push(menu.path);
   activeMenu.value = menu.path;
 }

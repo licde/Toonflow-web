@@ -346,7 +346,7 @@ function pickStoryboard(sb: StoryboardItem) {
 
   if (isWeakStill(sb)) {
     window.$message?.warning?.(
-      String(sb.userMessage || sb.ctaLabel || "该分镜为弱图/未验收，不可作高质量视频首帧"),
+      String(sb.userMessage || sb.ctaLabel || "弱图不可作视频首帧 — 请点「智能修复」重出 HQ 静照"),
     );
   }
 

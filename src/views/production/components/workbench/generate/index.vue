@@ -16,7 +16,7 @@
             <t-button size="small" class="genTextbtn" :loading="currentTrack.state == '生成中'" @click="genText">
               {{ $t("workbench.generate.generateText") }}
             </t-button>
-            <t-tag v-if="currentTrack.state === '需完善'" size="small" theme="warning" variant="light" class="ml-5">需完善·不可烧</t-tag>
+            <t-tag v-if="currentTrack.state === '需完善'" size="small" theme="warning" variant="light" class="ml-5">智能修复后可生成</t-tag>
           </template>
           <IdentitySlotChips :slots="identitySlots" />
           <ShotSpecDrawer
@@ -34,6 +34,7 @@
           />
           <VideoIntentDebtBar
             v-if="burnVideoDebt"
+            :title="burnVideoDebtTitle"
             :ok="burnVideoDebt.ok"
             :primary-action="burnVideoDebt.primaryAction"
             :primary-next-step="burnVideoDebt.primaryNextStep"
@@ -41,6 +42,7 @@
             :cta-label="burnVideoDebt.ctaLabel"
             :findings="burnVideoDebt.findings"
             :explain="burnVideoDebt.userMessage"
+            :code="burnVideoDebt.code"
             :diagnosing="burnVideoIrdLoading"
             :applying="burnVideoIrdApplying"
             :recompiling="currentTrack?.state == '生成中'"
@@ -70,7 +72,8 @@
           :active-track-index="activeTrackIndex"
           v-model:current-track="currentTrack"
           @refresh="getGenerateData"
-          @generate="generateVideo" />
+          @generate="generateVideo"
+          @smart-repair="runSmartRepairFromBurnCta" />
       </div>
     </div>
     <div class="track">
@@ -87,7 +90,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Ref } from "vue";
+import { computed, type Ref } from "vue";
 import newTrack from "./components/track.vue";
 import imageSelect from "./components/imageSelect.vue";
 import modeMenu from "./components/modeMenu.vue";
@@ -119,6 +122,39 @@ const shotSpecDrawerRef = ref<{
 const burnVideoDebt = ref<VideoIrdDiagnoseResponse | null>(null);
 const burnVideoIrdLoading = ref(false);
 const burnVideoIrdApplying = ref(false);
+const burnVideoDebtTitle = computed(() =>
+  burnVideoDebt.value?.code === "HEAL_THEN_BURN_LEDGER"
+    ? "生成缺债台账"
+    : "视频设计债 · 须 Confirm",
+);
+
+function mapHealNotesToLedger(
+  notes: string[],
+  debtLedger?: { id: string; label: string }[],
+): { id: string; label: string }[] {
+  if (Array.isArray(debtLedger) && debtLedger.length) return debtLedger;
+  const seen = new Set<string>();
+  const out: { id: string; label: string }[] = [];
+  const push = (id: string, label: string) => {
+    if (seen.has(id)) return;
+    seen.add(id);
+    out.push({ id, label });
+  };
+  for (const n of notes) {
+    if (/stale/i.test(n)) push("prompt_stale", "契约 stale 已清");
+    else if (/仓债|lipConfirm|importOk/i.test(n)) push("warehouse", "仓债已吸收");
+    else if (/需完善|轨道契约/i.test(n)) push("track_contract", "轨契约债已吸收");
+    else if (/静帧债|STILL-WEAK|污染|beatIsolation|contam/i.test(n))
+      push("still_contam", "静帧弱/跨镜污染已吸收");
+    else if (/I2V|visualPass|delivery/i.test(n)) push("i2v_ready", "I2V就绪债已吸收");
+    else if (/接触交接|CONTACT/i.test(n)) push("contact_handoff", "接触交接债已吸收");
+    else if (/首帧债|FIRSTFRAME/i.test(n)) push("firstframe", "首帧债已吸收");
+    else if (/姿态|POSE/i.test(n)) push("pose_handoff", "姿态交接债已吸收");
+    else if (/设计意图|fidelity/i.test(n)) push("fidelity", "设计意图未尽命中已降级");
+    else push(`note_${out.length}`, n.length > 36 ? `${n.slice(0, 36)}…` : n);
+  }
+  return out;
+}
 const cacheStore = imageListCacheStore();
 const { getCache, setCache, removeCache, initCacheFromTrackList, warmUpUrls, resolveUrls, resolveUrlSync } = cacheStore;
 const { urlMap } = storeToRefs(cacheStore);
@@ -156,12 +192,17 @@ function captureBurnVideoDebt(details: Record<string, unknown> | null | undefine
   const msg = String(details.userMessage ?? details.message ?? "");
   const cta = String(details.ctaLabel ?? "");
   const stale = /VIDEO-PROMPT-STALE|video_prompt_stale/i.test(`${code} ${trigger} ${msg} ${cta}`);
+  const notBurnReady = /TRACK_PROMPT_NOT_BURN_READY|需完善|智能修复|soft_patch/i.test(
+    `${code} ${step} ${cta} ${msg}`,
+  );
   const looksVid =
     stale ||
+    notBurnReady ||
     /DEX-VID|DUR-PAD|VP-THIN|vid_|PROMPT-FIDELITY/i.test(code) ||
     /vid_|video_prompt|cam_mediate|prompt_fidelity/i.test(trigger) ||
-    (step === "chat_repair" && /视频|运镜|伪台词|口型|beatDuration|DEX-VID|重编译|过期/i.test(`${msg}${cta}`)) ||
-    step === "human_review";
+    (step === "chat_repair" && /视频|运镜|伪台词|口型|beatDuration|DEX-VID|重编译|过期|智能修复/i.test(`${msg}${cta}`)) ||
+    step === "human_review" ||
+    step === "soft_patch";
   if (!looksVid) return;
   burnVideoDebt.value = {
     ok: false,
@@ -169,7 +210,7 @@ function captureBurnVideoDebt(details: Record<string, unknown> | null | undefine
       ? (details.findings as VideoIrdDiagnoseResponse["findings"])
       : [
           {
-            id: code || (stale ? "VIDEO-PROMPT-STALE" : "DEX-VID"),
+            id: code || (stale ? "VIDEO-PROMPT-STALE" : notBurnReady ? "TRACK_PROMPT_NOT_BURN_READY" : "DEX-VID"),
             severity: "BLOCK",
             message: msg || cta || (stale ? "设计/对白已变，须重编译视频提示词" : "视频设计债"),
           },
@@ -181,13 +222,14 @@ function captureBurnVideoDebt(details: Record<string, unknown> | null | undefine
     missingSlots: Array.isArray(details.missingSlots) ? (details.missingSlots as string[]) : [],
     ctaLabel:
       cta ||
+      (notBurnReady ? "智能修复" : "") ||
       videoIrdCtaLabel({
         primaryNextStep: step,
         primaryAction: stale ? "none" : "confirm_enhance",
         reverseTrigger: trigger,
         code,
       }),
-    primaryNextStep: (step as VideoIrdDiagnoseResponse["primaryNextStep"]) || "chat_repair",
+    primaryNextStep: (step as VideoIrdDiagnoseResponse["primaryNextStep"]) || (notBurnReady ? "soft_patch" : "chat_repair"),
     userMessage: msg || undefined,
   };
 }
@@ -347,23 +389,31 @@ async function runPreflight(): Promise<boolean> {
         "";
       const blockId =
         detectionRows.find((c) => c && c.passed === false && (c.severity === "BLOCK" || !c.severity))?.id || "";
-      const gs = prod?.gapSummary;
-      const gapHint = gs?.blocks ? ` BLOCK×${gs.blocks}` : "";
-      const planMsg = prod?.rePushPlan?.[0]
-        ? ` → ${prod.rePushPlan[0].trigger}→${prod.rePushPlan[0].reverseTarget}`
-        : "";
-      const detail = firstBlock
-        ? `: ${blockId ? `${blockId} ` : ""}${firstBlock}`
-        : gapHint
-          ? `:${gapHint}`
-          : "";
-      const prefix = $t("workbench.production.rulePanel.preflightBlock");
-      const label =
-        !prefix || prefix === "workbench.production.rulePanel.preflightBlock"
-          ? "触达前预检未通过，请先修复 BLOCK 项"
-          : prefix;
-      window.$message.error(label + detail + planMsg);
-      return false;
+      // heal_then_burn：预检 BLOCK 只反馈，不硬挡生成（缺首帧除外，见 agnesWarning）
+      const missingFrame = Boolean(agnesWarning.value);
+      if (missingFrame) {
+        window.$message.error(agnesWarning.value);
+        return false;
+      }
+      window.$message.warning("预检有债，继续生成（详见下方台账）");
+      if (firstBlock || blockId) {
+        burnVideoDebt.value = {
+          ok: true,
+          code: "HEAL_THEN_BURN_LEDGER",
+          findings: [
+            {
+              id: blockId || "PREFLIGHT",
+              severity: "WARN",
+              message: firstBlock || "预检有债",
+            },
+          ],
+          primaryAction: "none",
+          missingSlots: [firstBlock || blockId || "预检债"].filter(Boolean).slice(0, 3),
+          ctaLabel: "缺债台账",
+          primaryNextStep: "soft_patch",
+          userMessage: "预检有债已记入；不阻断生成",
+        };
+      }
     }
     return true;
   } catch (e: unknown) {
@@ -592,13 +642,36 @@ async function getGenerateData() {
       ...s,
       src: resolveUrlSync(s.id, "storyboard", s.src),
     }));
-    // 将本地缓存回写到 trackList，确保优先使用缓存数据（src 已解析为完整 URL）
+    // 将本地缓存与后端 medias 合并：分镜图以后端为准（已生成图不被旧空缓存盖住）
     data.trackList.forEach((track: TrackItem) => {
       if (track.id == null) return;
       const cached = getCache(pid, sid, track.id);
-      if (cached?.length) {
-        track.medias = cached as unknown as TrackMedia[];
+      const backend = (track.medias ?? []) as UploadItem[];
+      if (!cached?.length) {
+        setCache(pid, sid, track.id, backend);
+        return;
       }
+      const backendSb = backend.filter((m) => (m.sources ?? "storyboard") === "storyboard");
+      const backendAssets = backend.filter((m) => m.sources === "assets");
+      const cachedAssets = cached.filter((m) => m.sources === "assets");
+      const sbMerged = backendSb.map((b) => {
+        const hit = cached.find((c) => c.id === b.id && (c.sources ?? "storyboard") === "storyboard");
+        const src =
+          b.src ||
+          resolveUrlSync(b.id, "storyboard", hit?.src) ||
+          hit?.src ||
+          "";
+        return { ...hit, ...b, src, sources: "storyboard" as const };
+      });
+      // Keep user-picked assets from cache; fall back to backend assets
+      const assetMerged = cachedAssets.length
+        ? cachedAssets.map((c) => ({
+            ...c,
+            src: resolveUrlSync(c.id, "assets", c.src) || c.src,
+          }))
+        : backendAssets;
+      track.medias = [...sbMerged, ...assetMerged] as unknown as TrackMedia[];
+      setCache(pid, sid, track.id, track.medias as unknown as UploadItem[]);
     });
     // 整体赋值触发响应式
     trackList.value = [...data.trackList];
@@ -626,7 +699,7 @@ async function handlePromptBlur() {
       }
       if (body.state === "需完善" || body.burnAllowed === false) {
         window.$message?.warning?.(
-          String(body.userMessage || "手改提示词未达烧片标准（需完善），请完善后重编译"),
+          String(body.userMessage || "手改提示词未达烧片标准，请点「智能修复」"),
         );
       }
     }
@@ -866,11 +939,55 @@ onMounted(() => {
     startPoll();
   }
 });
-/** 单个轨道生成视频 */
+async function runSmartRepairFromBurnCta() {
+  // 智能修复 = 消债/降级反馈，不跳 SB 硬挡
+  const pid = project.value?.id;
+  const sid = episodesId.value;
+  if (pid == null || sid == null) {
+    window.$message?.warning?.("缺少项目/剧集 ID");
+    return;
+  }
+  try {
+    const { selfHeal, preflightProduction } = await import("@/utils/ruleEngine");
+    const heal = await selfHeal({
+      projectId: pid,
+      scriptId: sid,
+      shotId: primaryStoryboardId.value ?? undefined,
+      dryRun: false,
+      apply: true,
+      jobKind: "video",
+    });
+    const cdN = Array.isArray((heal as { cdHydrated?: string[] })?.cdHydrated)
+      ? (heal as { cdHydrated: string[] }).cdHydrated.length
+      : 0;
+    if (cdN) window.$message?.success?.(`已同源写回 ${cdN} 个角色 L0.identity`);
+    let virdToasted = false;
+    try {
+      await diagnoseBurnVideoIrd();
+      if (burnVideoDebt.value && burnVideoDebt.value.ok === false) {
+        await applyBurnVideoIrd();
+        virdToasted = true; // applyBurnVideoIrd already toasted exit/absorb
+      }
+    } catch {
+      /* VIRD optional */
+    }
+    await preflightProduction({ projectId: pid, scriptId: sid, tier: "T3" }).catch(() => null);
+    await getGenerateData();
+    // Dedup: avoid stacking「智能修复已执行」on top of VIRD absorb toast
+    if (!virdToasted) {
+      window.$message?.info?.("智能修复已执行（未尽项将实现已降级，不阻断生成）");
+    }
+  } catch (e: any) {
+    window.$message?.warning?.(e?.message || "智能修复部分完成，仍可继续生成");
+  }
+}
+
+/** 单个轨道生成视频 — 点击即生成（先智能修复吸收债，再烧） */
 async function generateVideo() {
   if (!(await runPreflight())) return;
   if (currentTrack.value?.state === "需完善" || currentTrack.value?.burnAllowed === false) {
-    window.$message.info("提示词有契约债 — 将 heal_then_burn（增强后继续烧），不挡操作");
+    await runSmartRepairFromBurnCta();
+    // heal_then_burn：修完继续烧，不 return
   }
   const dlg = DialogPlugin.confirm({
     header: $t("workbench.generate.generateConfirm"),
@@ -906,10 +1023,45 @@ async function generateVideo() {
           audio: modelParmas.value.audio,
           trackId: currentTrack.value.id,
         });
-        window.$message.success($t("workbench.generate.generateStarted"));
-        burnVideoDebt.value = null;
+        const body = data?.data ?? data;
+        const videoId =
+          typeof body === "object" && body != null && "videoId" in body
+            ? (body as { videoId: number }).videoId
+            : body;
+        if (body && typeof body === "object" && (body.implementationDegraded || body.healThenBurn)) {
+          window.$message.success($t("workbench.generate.generateStarted"));
+          const notes = Array.isArray((body as { notes?: string[] }).notes)
+            ? ((body as { notes: string[] }).notes as string[])
+            : [];
+          const ledger = mapHealNotesToLedger(
+            notes,
+            (body as { debtLedger?: { id: string; label: string }[] }).debtLedger,
+          );
+          if (ledger.length) {
+            window.$message.info("缺债已记入下方");
+            burnVideoDebt.value = {
+              ok: true,
+              code: "HEAL_THEN_BURN_LEDGER",
+              findings: ledger.map((l) => ({
+                id: l.id,
+                severity: "WARN",
+                message: l.label,
+              })),
+              primaryAction: "none",
+              missingSlots: ledger.map((l) => l.label),
+              ctaLabel: "缺债台账",
+              primaryNextStep: "soft_patch",
+              userMessage: "已继续生成；下列缺债已吸收/记录（不阻断）",
+            };
+          } else {
+            burnVideoDebt.value = null;
+          }
+        } else {
+          window.$message.success($t("workbench.generate.generateStarted"));
+          burnVideoDebt.value = null;
+        }
         currentTrack.value.videoList.push({
-          id: data,
+          id: videoId as number,
           state: "生成中",
           src: "",
         });
@@ -917,7 +1069,14 @@ async function generateVideo() {
         const details = e?.response?.data?.data ?? e?.data ?? e;
         const plan = details?.rePushPlan;
         const qd = details?.qualityDecision;
-        const um = details?.userMessage || qd?.userMessage || details?.message;
+        const hard = Array.isArray(details?.hardMisses)
+          ? (details.hardMisses as string[]).filter(Boolean).slice(0, 4)
+          : [];
+        const umRaw = details?.userMessage || qd?.userMessage || details?.message;
+        const um =
+          hard.length && !/硬债/.test(String(umRaw ?? ""))
+            ? `${umRaw || "首帧硬债"}（${hard.join(",")}）`
+            : umRaw;
         const suggested = details?.suggestedValue ?? qd?.suggestedValue;
         const cta = details?.ctaLabel || qd?.ctaLabel;
         const crt =
@@ -1144,7 +1303,7 @@ async function getTrackPromptList() {
             ingestVideoErrorReason(item.reason);
             window.$message.error(`提示词生成失败，${item.reason ?? "未知原因"}`);
           } else if (item.state === "需完善" || item.burnAllowed === false) {
-            window.$message.warning("提示词已落库但不可烧片（需完善），请按清单修复后重编译");
+            window.$message.warning("提示词已落库但不可烧片，请点「智能修复」");
           }
         }
       });

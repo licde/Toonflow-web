@@ -42,6 +42,8 @@ interface StoryboardItem {
   flowId?: number | null;
   id: number;
   index: number;
+  displayNo?: number;
+  badge?: string;
   projectId?: number | null;
   prompt?: string | null;
   reason?: string | null;
@@ -69,6 +71,9 @@ interface TrackItem {
   medias: TrackMedia[];
   videoList: VideoItem[];
   duration: number;
+  /** SSOT 段号 — never trackList array order */
+  displayNo?: number;
+  storyboardIndexMin?: number | null;
 }
 
 interface VideoItem {

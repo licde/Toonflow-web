@@ -58,14 +58,6 @@ const report = ref<ValidationReport | null>(null);
 const preflight = ref<Awaited<ReturnType<typeof preflightProduction>> | null>(null);
 const loading = ref(false);
 
-const summary = computed(() => {
-  if (preflight.value) {
-    return { blocked: preflight.value.blocked || preflight.value.blockGenerate, blocks: preflight.value.gapSummary?.blocks ?? 0 };
-  }
-  if (report.value) return { blocked: !report.value.passed, blocks: report.value.blockCount };
-  return null;
-});
-
 const displayIssues = computed(() => {
   const fromPreflight =
     preflight.value?.detectionResults
@@ -78,8 +70,24 @@ const displayIssues = computed(() => {
         autoFix: false,
         suggestedPrompt: undefined as string | undefined,
       })) ?? [];
-  const fromValidate = report.value?.issues.filter((i) => i.severity !== "INFO") ?? [];
-  return [...fromPreflight, ...fromValidate];
+  const fromValidate = report.value?.issues?.filter((i) => i.severity !== "INFO") ?? [];
+  // Prefer code severity: PR-09 lip suggestion stays WARN; never promote WARN→BLOCK in summary
+  return [...fromPreflight, ...fromValidate].map((i) => {
+    const msg = String(i.message ?? "");
+    if (i.ruleId === "PR-09" && /口型|speaking|嘴型/i.test(msg) && i.severity === "BLOCK") {
+      return { ...i, severity: "WARN" as ValidationIssue["severity"] };
+    }
+    if (i.ruleId === "MOD-01" && i.severity === "BLOCK") {
+      return { ...i, severity: "WARN" as ValidationIssue["severity"] };
+    }
+    return i;
+  });
+});
+
+const summary = computed(() => {
+  if (!preflight.value && !report.value) return null;
+  const blocks = displayIssues.value.filter((i) => i.severity === "BLOCK").length;
+  return { blocked: blocks > 0, blocks };
 });
 
 async function runValidate() {

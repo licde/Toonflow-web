@@ -61,6 +61,7 @@ import rulePanel from "../components/rulePanel/index.vue";
 import pipelineGateBar from "../components/pipelineGateBar/index.vue";
 import type { ValidationReport } from "@/types/ruleEngine";
 import { useAdaptationNav } from "@/composables/useAdaptationNav";
+import { normalizeStoryboardTableMd } from "@/utils/normalizeStoryboardTableMd";
 
 const { goDesignStage } = useAdaptationNav();
 const { themeSetting } = storeToRefs(settingStore());
@@ -93,6 +94,12 @@ const storyboardTable = defineModel<string>({ required: true });
 const editContent = ref("");
 const dialogVisible = ref(false);
 
+/** Heal glued rows on load / store hydrate so preview never sticks shot 1+2 */
+if (storyboardTable.value?.trim()) {
+  const healed = normalizeStoryboardTableMd(storyboardTable.value);
+  if (healed !== storyboardTable.value) storyboardTable.value = healed;
+}
+
 const toolbars: ToolbarNames[] = [
   "bold",
   "underline",
@@ -118,15 +125,14 @@ const toolbars: ToolbarNames[] = [
 ];
 
 function openEdit() {
-  editContent.value = storyboardTable.value ?? "";
+  editContent.value = normalizeStoryboardTableMd(storyboardTable.value ?? "");
   dialogVisible.value = true;
 }
 
 function onConfirm() {
-  storyboardTable.value = editContent.value;
+  storyboardTable.value = normalizeStoryboardTableMd(editContent.value);
   dialogVisible.value = false;
   productionAgentStore().setFlowData();
-
 }
 
 function onCancel() {

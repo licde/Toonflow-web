@@ -54,8 +54,14 @@ const popupPosition = ref({ left: 0, top: 0 });
 const editorContent = ref("");
 let savedRange: Range | null = null;
 let internalUpdate = false;
-// 类型对应的中文前缀，用于序列化标识符
+// 静帧方言：序列化优先 @图N（Seedream）；解析仍兼容 @图片N
 const TYPE_PREFIX: Record<string, string> = {
+  image: "图",
+  video: "视频",
+  audio: "音频",
+  text: "文本",
+};
+const TYPE_PREFIX_PARSE: Record<string, string> = {
   image: "图片",
   video: "视频",
   audio: "音频",
@@ -97,11 +103,15 @@ function getRefLabel(index: number): string {
  */
 function findRefIndexByTypeAndOrder(typePrefix: string, order: number): number {
   const refs = props.references ?? [];
-  // 将 "图" 归一化为 "图片"，兼容用户手动输入的 @图N 格式
-  const normalizedPrefix = typePrefix === "图" ? "图片" : typePrefix;
+  // 解析：@图N 与 @图片N 均指向 image 槽
+  const wantImage = typePrefix === "图" || typePrefix === "图片";
   let count = 0;
   for (let i = 0; i < refs.length; i++) {
-    if (TYPE_PREFIX[refs[i].type] === normalizedPrefix) {
+    const t = refs[i].type;
+    const match = wantImage
+      ? t === "image"
+      : TYPE_PREFIX[t] === typePrefix || TYPE_PREFIX_PARSE[t] === typePrefix;
+    if (match) {
       count++;
       if (count === order) return i;
     }
@@ -151,12 +161,12 @@ function createRefTag(index: number): HTMLSpanElement {
 }
 /**
  * 将 prompt 文本渲染到编辑器
- * 序列化格式：@图1、@视频1、@音频1、@文本1
+ * 序列化格式：@图1（Seedream）、兼容解析 @图片1；@视频1、@音频1、@文本1
  */
 function renderPromptToEditor(text: string) {
   if (!editorRef.value) return;
   editorRef.value.innerHTML = "";
-  // 匹配 @图N、@视频N、@音频N、@文本N 或换行
+  // 匹配 @图N / @图片N、@视频N、@音频N、@文本N 或换行
   const regex = /@(图|图片|视频|音频|文本)(\d+)|\n/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -331,7 +341,7 @@ function selectReference(index: number) {
 }
 /**
  * 提取编辑器内容为序列化字符串
- * 引用标签序列化为 @图1、@视频1、@音频1 等（按类型分别计数）
+ * 引用标签序列化为 @图1（静帧同源）、@视频1、@音频1 等
  */
 function extractContent(parent: Node): string {
   let result = "";

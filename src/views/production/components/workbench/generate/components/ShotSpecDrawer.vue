@@ -10,7 +10,7 @@
         :disabled="!canHeal"
         @click="runHeal"
       >
-        一键自愈
+        智能修复
       </t-button>
       <div v-if="redBlocks.length" class="lights">
         <t-tag v-for="(r, i) in redBlocks" :key="i" theme="danger" variant="light" size="small">{{ r.message }}</t-tag>
@@ -211,10 +211,15 @@ const canHeal = computed(
     props.projectId != null &&
     props.scriptId != null &&
     !healing.value &&
-    (redBlocks.value.length > 0 ||
+    (loaded.value ||
+      redBlocks.value.length > 0 ||
       (payload.value?.missingAssetImageQueue?.length ?? 0) > 0 ||
       (healResult.value?.nextQueue?.length ?? 0) > 0 ||
-      healResult.value?.nextStep === "batch_still"),
+      healResult.value?.nextStep === "batch_still" ||
+      healResult.value?.nextStep === "soft_patch" ||
+      healResult.value?.primaryNextStep === "soft_patch" ||
+      healResult.value?.primaryNextStep === "split_shot" ||
+      Boolean(videoIrd.value && videoIrd.value.ok === false)),
 );
 const specJson = computed(() => JSON.stringify(payload.value?.spec ?? {}, null, 2));
 const paramsJson = computed(() => JSON.stringify(payload.value?.params ?? {}, null, 2));
@@ -413,7 +418,7 @@ async function runHeal() {
   }
 }
 
-// Auto-load gaps so「一键自愈」可点，无需先开设定对照
+// Auto-load gaps so「智能修复」可点，无需先开设定对照
 watch(
   () => [props.projectId, props.scriptId, props.storyboardId],
   () => {

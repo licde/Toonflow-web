@@ -1070,7 +1070,7 @@
         "importingLoading": "กำลังนำเข้า โปรดรอสักครู่...",
         "mainTrackVideo": "แทร็กหลัก (วิดีโอ)",
         "subtitle1": "ซับไตเติล 1",
-        "storyboardVideoName": "{สตอรี่บอร์ด}-{id}.mp4"
+        "storyboardVideoName": "{storyboard}-{id}.mp4"
       },
       "preview": {
         "noImage": "ยังไม่มีรูปภาพ",
@@ -1484,7 +1484,7 @@
   "selectAll": "เลือกทั้งหมด",
   "selected": "เลือกแล้ว",
   "importVideo": "นำเข้าวิดีโอ",
-  "emptyTrack": "ย่อหน้า {ดัชนี 1}",
+  "emptyTrack": "ย่อหน้า {index}",
   "del": "ยืนยันการลบ",
   "delConfirm": "คุณแน่ใจหรือไม่ว่าต้องการลบย่อหน้านี้",
   "selectSource": "เลือกแหล่งที่มา",

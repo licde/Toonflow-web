@@ -29,13 +29,13 @@
             :checked="track.id != null && checkedTrackIds.includes(track.id)"
             @click.stop
             @change="(val: boolean) => toggleCheck(track.id, val)" />
-          <t-tag class="indexTag" size="small">#{{ index + 1 }}</t-tag>
+          <t-tag class="indexTag" size="small">#{{ track.displayNo ?? index + 1 }}</t-tag>
           <t-tag
             class="needsFixTag"
             theme="warning"
             size="small"
             v-if="track.state === '需完善' || track.burnAllowed === false"
-          >需完善</t-tag>
+          >待智能修复</t-tag>
           <t-tag class="selectTag" theme="success" size="small" v-if="track.selectVideoId">已选择</t-tag>
           <!-- 优先展示选中视频的首帧 -->
           <div class="thumbGroup" v-if="track.selectVideoId && getSelectedVideoSrc(track)">
@@ -60,7 +60,7 @@
               </template>
             </template>
           </div>
-          <span v-else class="emptyTrack">{{ $t("workbench.generate.emptyTrack", { index: index + 1 }) }}</span>
+          <span v-else class="emptyTrack">{{ $t("workbench.generate.emptyTrack", { index: track.displayNo ?? index + 1 }) }}</span>
           <div class="deleteBtn" @click.stop="confirmDeleteTrack(index)">
             <i-close size="14" />
           </div>
@@ -329,7 +329,7 @@ function batchGenVideo() {
       const notBurnReady = checkedTrackData.filter((i) => i.state === "需完善" || i.burnAllowed === false);
       if (notBurnReady.length) {
         return window.$message.warning(
-          `有 ${notBurnReady.length} 条轨道提示词「需完善」不可烧片，请先重编译或按清单修复`,
+          `有 ${notBurnReady.length} 条轨道将智能修复后继续生成（不硬阻断）`,
         );
       }
 

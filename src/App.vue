@@ -71,14 +71,18 @@ async function getPort() {
   await nextTick();
   await nextTick();
   await nextTick();
-  try {
-    const res = await fetch("toonflow://getAppUrl");
-    const data = await res.json();
-    if (data?.url) {
-      baseUrl.value = data.url;
-      isElectron.value = true;
-    }
-  } catch (error) {}
+  // toonflow:// 仅 Electron 注册；普通浏览器 fetch 会刷 "URL scheme is not supported"
+  const likelyElectron = /Electron/i.test(navigator.userAgent);
+  if (likelyElectron) {
+    try {
+      const res = await fetch("toonflow://getAppUrl");
+      const data = await res.json();
+      if (data?.url) {
+        baseUrl.value = data.url;
+        isElectron.value = true;
+      }
+    } catch (error) {}
+  }
 
   const { setupMdEditor } = await import("@/utils/mdEditorSetup");
   void setupMdEditor(handleLinkClick);

@@ -6,16 +6,12 @@
         :loading="generating"
         :title="
           currentTrack?.state === '需完善' || currentTrack?.burnAllowed === false
-            ? '契约债未清 — 点击将 heal_then_burn（增强后继续烧）'
+            ? '将智能修复后继续生成（实现已降级反馈，不硬阻断）'
             : undefined
         "
         @click="emit('generate')"
       >
-        {{
-          currentTrack?.state === "需完善" || currentTrack?.burnAllowed === false
-            ? "增强并继续烧"
-            : $t("workbench.generate.generate")
-        }}
+        {{ $t("workbench.generate.generate") }}
       </t-button>
     </template>
     <div class="history">
@@ -106,6 +102,7 @@ const currentTrack = defineModel<TrackItem>("currentTrack", {
 });
 const emit = defineEmits<{
   generate: [];
+  "smart-repair": [];
   refresh: [];
 }>();
 

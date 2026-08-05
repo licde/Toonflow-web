@@ -67,11 +67,22 @@ export interface DryRunImportSummary {
       softPatchEligible: number;
     };
     chatRepairText?: string;
+    /** A/超限 B only — RulePanel must; never all blockIds */
+    chatMustFixIds?: string[];
+    laneDiagnostics?: {
+      mustIds: string[];
+      autoIds: string[];
+      actuatorsRan?: string[];
+      cleared?: string[];
+      residual?: string[];
+    };
     blocks?: { id: string; message?: string; field?: string }[];
     warns?: { id: string; message?: string }[];
     repairHints?: { id: string; chatTemplate?: string; ruleId?: string }[];
     missingFieldSummary?: string;
     shapeSalvageLog?: { ruleId: string; path: string; action: string }[];
   };
+  /** Top-level mirror of exportGate.chatMustFixIds (dryRun) */
+  chatMustFixIds?: string[];
   chatRepairText?: string;
 }

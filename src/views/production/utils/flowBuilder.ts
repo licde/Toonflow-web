@@ -44,10 +44,18 @@ export interface AssetItem {
 
 export interface Storyboard {
   id?: number;
+  /** DB 0-based index — displayNo = index + 1 */
+  index?: number;
+  /** SSOT 镜号 — never v-for array order */
+  displayNo?: number;
+  badge?: string;
   duration?: number;
   prompt: string;
   trackId?: number;
   associateAssetsIds?: number[];
+  /** id → preview URL when assetsData lacks the row (e.g. synth 休书) */
+  associateAssetSrcs?: Record<number, string>;
+  propSoftAssetId?: number;
   referenceWarnings?: { code: string; assetId?: number; message: string }[];
   audioPrompt?: string;
   fxPrompt?: string;
@@ -82,6 +90,18 @@ export interface FlowData {
   storyboard: Storyboard[];
   workbench: {
     videoList: VideoList[];
+  };
+  visSyncDrift?: {
+    drifted?: boolean;
+    tableRowCount?: number;
+    livePanelCount?: number;
+    message?: string;
+    ctaLabel?: string;
+  };
+  visSyncDebt?: {
+    code?: string;
+    message?: string;
+    ctaLabel?: string;
   };
 }
 

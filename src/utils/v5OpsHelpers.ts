@@ -26,12 +26,13 @@ export function toastAfterApplyExitGate(
     return true;
   }
   if (designExitStillOpen(body)) {
-    window.$message?.warning?.(
-      body.a11yAnnounce ||
-        body.userMessage ||
-        body.note ||
-        "已写库但 designExit 未过 — 禁止假绿，请继续 Confirm / 智能设计",
-    );
+    const short =
+      body.userMessage && /已吸收|可继续生成|债已清/.test(String(body.userMessage))
+        ? String(body.userMessage)
+        : "设计债未尽已记入台账（不阻断生成）";
+    // Avoid dumping exit:DEX-* long lists into toast
+    const msg = /exit:/i.test(short) ? "设计债未尽已记入台账（不阻断生成）" : short;
+    window.$message?.info?.(msg);
     return false;
   }
   window.$message?.success?.(body.a11yAnnounce || body.userMessage || body.note || closedLabel);

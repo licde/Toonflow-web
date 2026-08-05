@@ -71,8 +71,20 @@ export interface StillMeta {
   autoRepairRound?: number;
   autoRepairBudgetLeft?: number;
   handoffReason?: string;
+  /** SingleShotClosedCompose — true only when all gates pass */
+  closedCompose?: boolean;
+  boundShotIndex?: number | null;
+  framingMode?: string | null;
+  closedAssertReasons?: string[];
+  contaminationClass?: string | null;
+  flowStaleHint?: boolean;
   /** Event refs echo */
   refsRoles?: string[];
+  /** Physical send-order thumbs for @图N chip verify */
+  refThumbUrls?: string[];
+  vendorPromptUsed?: string | null;
+  promptUsed?: string | null;
+  oneClickRepairKind?: string | null;
   propPlateMissing?: boolean;
   synthesizedPropPlate?: boolean;
   softEnvMissingHonest?: boolean;
@@ -277,6 +289,32 @@ export function resolveStillPrimaryCtaLabel(meta: StillMeta | null | undefined):
   blocksGenerate: boolean;
 } {
   if (!meta) return { kind: "generate", label: "生成静帧", blocksGenerate: false };
+  const ock = String(meta.oneClickRepairKind ?? "");
+  if (ock === "design_refine") {
+    return { kind: "enhance_and_generate", label: "设计细化·补挂图N资产", blocksGenerate: false };
+  }
+  if (ock && ock !== "none" && ock !== "confirm_required") {
+    return {
+      kind: "one_click_heal",
+      label:
+        ock === "split" || ock === "shotSize_and_split"
+          ? "一键智拆并生成"
+          : ock === "shotSize"
+            ? "一键改景别并生成"
+            : ock === "partial_edit"
+              ? "局部智能修复"
+              : ock === "restore_scene"
+                ? "一键智能修复·恢复场景板"
+                : ock === "rebind_ordinal"
+                  ? "一键智能修复·重绑@图N"
+                  : ock === "recompile_keep_ordinal"
+                    ? "一键智能修复·重编译保留@图N"
+                    : ock === "regen_still_then_burn"
+                      ? "一键智能修复·先重出静照"
+                      : "一键智能修复",
+      blocksGenerate: false,
+    };
+  }
   if (meta.debtKind === "missing_identity" || meta.propPlateGrade === "identity_missing") {
     return { kind: "enqueue_identity_and_generate", label: "补定妆并继续生成", blocksGenerate: false };
   }
@@ -285,6 +323,13 @@ export function resolveStillPrimaryCtaLabel(meta: StillMeta | null | undefined):
   }
   if (meta.stillQuality === "hq_ok" && meta.visualPass === true) {
     return { kind: "burn_ready", label: "可烧视频", blocksGenerate: false };
+  }
+  // Intent-first: pose realization debt does not block burn CTA
+  if (
+    meta.realizationDegraded === true ||
+    (meta as { realization?: { realizationDegraded?: boolean } }).realization?.realizationDegraded === true
+  ) {
+    return { kind: "burn_ready", label: "可烧视频（姿态债）", blocksGenerate: false };
   }
   const step = String(meta.primaryNextStep ?? "");
   const ird = String(meta.irdPrimaryAction ?? "");
@@ -395,4 +440,75 @@ export function deriveTrackBurnAllowed(opts: {
 /** IMPORT_OK_NOT_EXIT must surface in DebtBar — not treated as design exit pass */
 export function showImportOkNotExitBanner(meta: StillMeta | null | undefined): boolean {
   return meta?.importOkNotExit === true;
+}
+
+/** Seedream still dialect chips: prefer @图N, also parse @图片N */
+export type AtTuEgressChip = {
+  ordinal: number;
+  token: string;
+  label: string;
+  thumbUrl: string;
+  missingThumb: boolean;
+  role?: string;
+};
+
+export function resolveAtTuEgressChips(input: {
+  egressPrompt?: string | null;
+  refsRoles?: string[] | null;
+  refThumbUrls?: string[] | null;
+  fallbackThumbs?: string[] | null;
+}): { chips: AtTuEgressChip[]; dialect: "tu" | "tupian" | "mixed" | "none"; chipCount: number; refCount: number } {
+  const p = String(input.egressPrompt ?? "");
+  const tu = [...p.matchAll(/@图(\d+)\s*为([^\s@【，,]+)?/g)];
+  const tupian = [...p.matchAll(/@图片(\d+)/g)];
+  const roles = input.refsRoles ?? [];
+  const thumbs = input.refThumbUrls?.length ? input.refThumbUrls : input.fallbackThumbs ?? [];
+  const byOrd = new Map<number, AtTuEgressChip>();
+  for (const m of tu) {
+    const ordinal = Number(m[1]);
+    byOrd.set(ordinal, {
+      ordinal,
+      token: `@图${ordinal}`,
+      label: String(m[2] ?? "").trim() || `图${ordinal}`,
+      thumbUrl: String(thumbs[ordinal - 1] ?? ""),
+      missingThumb: !String(thumbs[ordinal - 1] ?? "").trim(),
+      role: roles[ordinal - 1],
+    });
+  }
+  if (!byOrd.size) {
+    for (const m of tupian) {
+      const ordinal = Number(m[1]);
+      byOrd.set(ordinal, {
+        ordinal,
+        token: `@图片${ordinal}`,
+        label: `图${ordinal}`,
+        thumbUrl: String(thumbs[ordinal - 1] ?? ""),
+        missingThumb: !String(thumbs[ordinal - 1] ?? "").trim(),
+        role: roles[ordinal - 1],
+      });
+    }
+  }
+  for (let i = 0; i < Math.max(roles.length, thumbs.length); i++) {
+    const ordinal = i + 1;
+    if (!byOrd.has(ordinal)) {
+      byOrd.set(ordinal, {
+        ordinal,
+        token: `@图${ordinal}`,
+        label: String(roles[i] ?? `图${ordinal}`),
+        thumbUrl: String(thumbs[i] ?? ""),
+        missingThumb: !String(thumbs[i] ?? "").trim(),
+        role: roles[i],
+      });
+    }
+  }
+  const chips = [...byOrd.values()].sort((a, b) => a.ordinal - b.ordinal);
+  const dialect =
+    tu.length && tupian.length ? "mixed" : tu.length ? "tu" : tupian.length ? "tupian" : chips.length ? "tu" : "none";
+  return { chips, dialect, chipCount: chips.length, refCount: Math.max(roles.length, thumbs.filter(Boolean).length) };
+}
+
+/** Canvas egress: prefer vendorPromptUsed ZH @图N */
+export function resolveStillCanvasDisplayPrompt(meta: StillMeta | null | undefined): string {
+  const v = String(meta?.vendorPromptUsed || meta?.promptUsed || "").trim();
+  return v;
 }
